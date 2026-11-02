@@ -1,10 +1,19 @@
 // ProblemVault shell: problem tree, routing, live sync, and the side panel
 // (problem details, Claude notes / questions, CalcVault). The drawing board
 // itself lives in board.js.
+//
+// One page, three installable apps (the server sets <html data-mode>):
+//   desktop  /        everything side by side
+//   tablet   /tablet  the page first; problems and the panel slide in as menus
+//   phone    /phone   problems, Claude, CalcVault, and a read-only view of the page
+// Devices with Follow on all open the problem last opened on any of them.
 import * as board from './board.js';
 
 const $ = s => document.querySelector(s);
 const clientId = Math.random().toString(36).slice(2, 10);
+const MODE = document.documentElement.dataset.mode || 'desktop';
+const BASE = MODE === 'desktop' ? '' : `/${MODE}`;
+let follow = localStorage.getItem('problemvault.follow') !== '0';
 let state = null; // /api/state
 let ws = null; // { meta, claude } of the open workspace
 let wsEvents = null;
@@ -65,8 +74,8 @@ async function start() {
   $('#login').hidden = true;
   $('#app').hidden = false;
   await loadState();
-  listen('index', () => loadState());
-  route();
+  listen('index', m => (m.type === 'focus' ? onFocus(m.ws) : loadState()));
+  route(true);
 }
 
 function showLogin() {
@@ -106,12 +115,43 @@ function listen(key, onMsg) {
 // Routing: /w/<id>
 // ---------------------------------------------------------------------------
 
-function route() {
-  const m = /^\/w\/([a-z0-9]+)/i.exec(location.pathname);
-  if (m) openWorkspace(m[1], false);
+async function route(first = false) {
+  const m = /\/w\/([a-z0-9]+)/i.exec(location.pathname);
+  let id = m?.[1];
+  if (first && follow) { // join whatever problem the other devices are on
+    const f = await call('GET', '/api/focus').catch(() => ({}));
+    if (f.ws) { id = f.ws; history.replaceState(null, '', `${BASE}/w/${id}`); }
+  }
+  if (id) openWorkspace(id, false, { announce: false });
   else showEmpty();
 }
-window.addEventListener('popstate', route);
+window.addEventListener('popstate', () => route());
+
+// Another device opened a problem
+function onFocus(id) {
+  if (follow && id && id !== ws?.meta.id) openWorkspace(id, true, { announce: false });
+}
+
+function renderFollow() {
+  document.querySelectorAll('.follow-btn').forEach(b => {
+    b.classList.toggle('on', follow);
+    b.title = follow ? 'Following: this device opens the problem you open on any device. Click to stop.' : 'Not following other devices. Click to follow.';
+  });
+}
+
+function setFollow(on) {
+  follow = on;
+  localStorage.setItem('problemvault.follow', on ? '1' : '0');
+  renderFollow();
+  if (on) {
+    call('GET', '/api/focus').then(f => {
+      if (f.ws && f.ws !== ws?.meta.id) openWorkspace(f.ws, true, { announce: false });
+      else if (!f.ws && ws) call('PUT', '/api/focus', { ws: ws.meta.id, client: clientId });
+    }).catch(() => {});
+  }
+}
+document.querySelectorAll('.follow-btn').forEach(b => { b.onclick = () => setFollow(!follow); });
+renderFollow();
 
 function showEmpty() {
   ws = null;
@@ -122,16 +162,17 @@ function showEmpty() {
   renderTree();
 }
 
-async function openWorkspace(id, push = true) {
-  if (push) history.pushState(null, '', `/w/${id}`);
+async function openWorkspace(id, push = true, { announce = true } = {}) {
+  if (push) history.pushState(null, '', `${BASE}/w/${id}`);
   let data;
   try {
     data = await call('GET', `/api/ws/${id}`);
   } catch (err) {
     toast(err.message);
-    history.replaceState(null, '', '/');
+    history.replaceState(null, '', BASE || '/');
     return showEmpty();
   }
+  if (announce && follow) call('PUT', '/api/focus', { ws: id, client: clientId }).catch(() => {});
   ws = { meta: data.meta, claude: data.claude };
   $('#empty').hidden = true;
   $('#board').hidden = false;
@@ -168,7 +209,7 @@ async function onWsEvent(m) {
     const el = $('#ask-state');
     if (m.state === 'running') el.textContent = 'Claude is working on it…';
     else if (m.state === 'done') el.textContent = '';
-    else if (m.state === 'error') { el.textContent = ''; toast(`Claude CLI failed: ${m.error}`, 8000); }
+    else if (m.state === 'error') { el.textContent = `Claude failed: ${m.error}`; toast('Claude failed (see the Claude tab)', 3000); }
   }
 }
 
@@ -295,8 +336,9 @@ $('#logout-btn').onclick = async () => {
   location.href = '/';
 };
 $('#side-toggle').onclick = () => $('#app').classList.toggle('side-open');
+$('#empty-menu').onclick = () => $('#app').classList.add('side-open');
 document.addEventListener('pointerdown', e => {
-  if ($('#app').classList.contains('side-open') && !e.target.closest('#sidebar, #side-toggle')) $('#app').classList.remove('side-open');
+  if ($('#app').classList.contains('side-open') && !e.target.closest('#sidebar, #side-toggle, #empty-menu')) $('#app').classList.remove('side-open');
 });
 
 // ---------------------------------------------------------------------------
@@ -314,6 +356,7 @@ document.querySelectorAll('.tabs button').forEach(b => { b.onclick = () => showT
 showTab(localStorage.getItem('problemvault.tab') || 'problem');
 
 function setPanel(open) {
+  if (MODE === 'phone') open = true; // the panel is the phone app
   $('#main').classList.toggle('panel-open', open);
   $('#panel-toggle').classList.toggle('on', open);
   localStorage.setItem('problemvault.panel', open ? '1' : '0');
@@ -321,7 +364,9 @@ function setPanel(open) {
   requestAnimationFrame(() => board.relayout());
 }
 $('#panel-toggle').onclick = () => setPanel(!$('#main').classList.contains('panel-open'));
-setPanel(localStorage.getItem('problemvault.panel') !== '0' && innerWidth > 1100);
+// tablet: the page first, the panel is a menu you open
+setPanel(MODE === 'phone' || (MODE === 'desktop' && localStorage.getItem('problemvault.panel') !== '0' && innerWidth > 1100));
+if (MODE === 'phone') board.setReadOnly(true);
 
 // ---------------------------------------------------------------------------
 // Problem tab
@@ -370,7 +415,7 @@ $('#ws-folder').onchange = e => saveMeta({ folder: e.target.value || null }, 0);
 $('#ws-delete').onclick = async () => {
   if (!ws || !confirm(`Delete "${ws.meta.title}"? It moves to the data folder's trash.`)) return;
   await call('DELETE', `/api/workspaces/${ws.meta.id}`);
-  history.pushState(null, '', '/');
+  history.pushState(null, '', BASE || '/');
   await loadState();
   showEmpty();
 };

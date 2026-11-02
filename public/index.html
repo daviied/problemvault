@@ -38,6 +38,10 @@
       <button id="new-folder">+ Folder</button>
     </div>
     <nav id="tree"></nav>
+    <div class="side-foot">
+      <button class="follow-btn text" aria-label="Follow other devices">Follow devices</button>
+      <span class="apps">Apps: <a href="/">Desktop</a> · <a href="/tablet">Tablet</a> · <a href="/phone">Phone</a></span>
+    </div>
   </aside>
 
   <main id="main">
@@ -45,12 +49,14 @@
       <h2>Pick a problem, or start one</h2>
       <p>Each problem gets its own page. Paste or upload the circuit / equation from your homework, then work it out on top.</p>
       <button id="empty-new">+ New problem</button>
+      <button id="empty-menu" class="subtle">Open problems</button>
     </div>
 
     <div id="board" hidden>
       <header id="toolbar">
         <button id="side-toggle" class="icon" title="Problems"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
         <span id="title"></span>
+        <button class="follow-btn text" aria-label="Follow other devices">Follow</button>
         <span class="sep"></span>
         <div class="group tools">
           <button data-tool="pen" aria-label="Pen" title="Pen (P)"><svg viewBox="0 0 24 24"><path d="M4 20l1.2-4.6L16.5 4.1a2 2 0 0 1 2.8 0l.6.6a2 2 0 0 1 0 2.8L8.6 18.8z"/><path d="M14.5 6l3.5 3.5"/></svg></button>
@@ -72,8 +78,8 @@
           <button id="undo" aria-label="Undo" title="Undo"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
           <button id="redo" aria-label="Redo" title="Redo"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg></button>
           <button id="more" aria-label="More" title="More"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg></button>
-          <button id="panel-toggle" class="text" title="Problem, Claude and CalcVault">Panel</button>
         </div>
+        <button id="panel-toggle" class="text" title="Problem, Claude and CalcVault">Panel</button>
       </header>
       <div id="menu" hidden>
         <label class="row"><input type="checkbox" id="opt-scribble"> Scribble to erase</label>

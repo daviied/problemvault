@@ -10,6 +10,18 @@ Homework workspaces. One page per problem: paste the circuit or equation, work i
 - **Claude**: MCP server at `/mcp`. Claude reads your ink, posts notes in the side panel, and writes and draws on the page with you, live.
 - **PWA**: install it from the browser on laptop or phone (needs https, or localhost).
 
+## Three apps, synced
+
+Open each address on its device and install it (browser menu → Install / Add to Home Screen):
+
+| App | Address | What it shows |
+|---|---|---|
+| Desktop | `/` | Everything side by side |
+| Tablet | `/tablet` | The page, full screen. ☰ opens problems, **Panel** opens Problem / Claude / CalcVault |
+| Phone | `/phone` | Problems, Claude, CalcVault, plus a small read-only view of the page (drag to pan, pinch to zoom) |
+
+**Follow** (toolbar and sidebar): when you open a problem on one device, the other devices with Follow on open it too. Turn it off on a device to work on a different problem there. Ink, text and Claude's notes sync live on all devices.
+
 ## Low token use
 
 Claude pays for an image by its pixel area. ProblemVault never sends screenshots:

@@ -38,27 +38,50 @@ SYSTEM = (
 )
 
 
+def _clean(token):
+    # a token copied from a terminal is often wrapped onto several lines
+    return "".join((token or "").split())
+
+
+def env_token():
+    return _clean(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"))
+
+
 def saved_token():
-    return store.secrets_file().get("claude_token", "")
+    return _clean(store.secrets_file().get("claude_token", ""))
 
 
 def set_token(token):
-    store.update_secrets({"claude_token": token.strip()})
+    store.update_secrets({"claude_token": _clean(token)})
 
 
 def _env():
     env = dict(os.environ)
-    tok = saved_token()
+    env.pop("ANTHROPIC_API_KEY", None)  # never fall back to API billing
+    # an empty CLAUDE_CODE_OAUTH_TOKEN (the compose default) would hide a /login made in the terminal
+    env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+    tok = saved_token() or env_token()
     if tok:
         env["CLAUDE_CODE_OAUTH_TOKEN"] = tok
-    env.pop("ANTHROPIC_API_KEY", None)  # never fall back to API billing
     return env
 
 
 def logged_in():
-    if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or saved_token():
+    if env_token() or saved_token():
         return True
     return os.path.exists(os.path.join(os.path.expanduser("~"), ".claude", ".credentials.json"))
+
+
+def explain(err):
+    """Turn Claude Code's login errors into steps the student can follow."""
+    if "/login" in err or "Invalid API key" in err or "401" in err or "OAuth" in err:
+        how = ("the saved token is wrong or expired" if saved_token() else
+               "the CLAUDE_CODE_OAUTH_TOKEN token is wrong or expired" if env_token() else
+               "the terminal login has expired")
+        return (f"Claude Code is not logged in: {how}. Make a new token with "
+                "`docker exec -it problemvault claude setup-token`, then paste it in the plug dialog "
+                f"(Claude in this app) and click Save and Test. Details: {err[-200:]}")
+    return err
 
 
 def available():
@@ -70,7 +93,7 @@ def status():
         "installed": bool(CLI),
         "loggedIn": bool(CLI) and logged_in(),
         "tokenSaved": bool(saved_token()),
-        "envToken": bool(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")),
+        "envToken": bool(env_token()),
         "ready": available(),
     }
 
@@ -86,9 +109,14 @@ def test():
     except (OSError, subprocess.TimeoutExpired) as e:
         return False, str(e)
     out = (p.stdout or "").strip()
-    if p.returncode == 0 and out:
+    if p.returncode == 0 and out and not _login_error(out):
         return True, f"Claude answered: {out[:100]}"
-    return False, (p.stderr or p.stdout or f"exit {p.returncode}").strip()[-400:]
+    return False, explain((p.stderr or p.stdout or f"exit {p.returncode}").strip()[-400:])
+
+
+def _login_error(text):
+    # Claude Code can print its login error as the "answer" on stdout
+    return len(text) < 300 and ("/login" in text or "Invalid API key" in text)
 
 
 def manual_prompt(w, q):
@@ -120,8 +148,8 @@ def run(w, q, port, token):
                 capture_output=True, text=True, encoding="utf-8", timeout=600, cwd=store.DATA_DIR, env=_env(),
             )
             answer = (p.stdout or "").strip()
-            if p.returncode != 0 or not answer:
-                raise RuntimeError((p.stderr or p.stdout or f"exit {p.returncode}").strip()[-600:])
+            if p.returncode != 0 or not answer or _login_error(answer):
+                raise RuntimeError(explain((p.stderr or p.stdout or f"exit {p.returncode}").strip()[-600:]))
             post_note(wid, answer, q["id"])
             events.publish(wid, {"type": "ask", "state": "done", "question": q["id"]})
         except Exception as e:  # report it in the app instead of failing silently

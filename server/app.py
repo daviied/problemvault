@@ -134,6 +134,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         self.route("POST")
 
+    def do_PUT(self):
+        self.route("PUT")
+
     def do_PATCH(self):
         self.route("PATCH")
 
@@ -171,8 +174,17 @@ class Handler(BaseHTTPRequestHandler):
     # -- static files ---------------------------------------------------------
 
     def static(self, path):
-        if path in ("/", "/index.html") or path.startswith("/w/"):
-            path = "/index.html"
+        # Three installable apps share one page: / (desktop), /tablet (drawing first),
+        # /phone (problems, Claude, CalcVault; page view only). Each has its own manifest.
+        mode = next((m for m in ("tablet", "phone") if path == f"/{m}" or path.startswith(f"/{m}/w/")), None)
+        if mode or path in ("/", "/index.html") or path.startswith("/w/"):
+            with open(os.path.join(PUBLIC_DIR, "index.html"), encoding="utf-8") as f:
+                html = f.read()
+            if mode:
+                html = (html.replace('<html lang="en">', f'<html lang="en" data-mode="{mode}">', 1)
+                        .replace('href="/manifest.webmanifest"', f'href="/manifest-{mode}.webmanifest"', 1)
+                        .replace("<title>ProblemVault</title>", f"<title>ProblemVault {mode.title()}</title>", 1))
+            return self.send(200, html, "text/html; charset=utf-8", {"Cache-Control": "no-cache"})
         full = os.path.abspath(os.path.join(PUBLIC_DIR, path.lstrip("/")))
         if not full.startswith(PUBLIC_DIR + os.sep) or not os.path.isfile(full):
             raise HttpError(404, "Not found")
@@ -223,6 +235,16 @@ class Handler(BaseHTTPRequestHandler):
 
         if head == "state" and method == "GET":
             return self.send(200, self.state())
+        if head == "focus":  # the problem open on your devices; the others follow it
+            if method == "PUT":
+                b = self.json_body()
+                wid = b.get("ws")
+                if wid and not store.get_workspace(wid):
+                    raise HttpError(404, "No such workspace")
+                f = store.set_focus(wid or None)
+                events.publish("index", {"type": "focus", "ws": f["ws"]}, origin=b.get("client"))
+                return self.send(200, f)
+            return self.send(200, store.get_focus())
         if head == "events" and method == "GET":
             return self.sse(qs.get("key", "index"))
         if head == "folders":

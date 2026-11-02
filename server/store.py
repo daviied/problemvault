@@ -174,6 +174,20 @@ def create_workspace(title, folder=None):
         return w
 
 
+def get_focus():
+    """The problem last opened on any device (devices with Follow on open it too)."""
+    f = _read(os.path.join(DATA_DIR, "focus.json"), {"ws": None, "at": 0})
+    if f.get("ws") and not get_workspace(f["ws"]):
+        f["ws"] = None
+    return f
+
+
+def set_focus(wid):
+    f = {"ws": wid, "at": now_ms()}
+    _write(os.path.join(DATA_DIR, "focus.json"), f)
+    return f
+
+
 def get_workspace(wid):
     return next((w for w in index()["workspaces"] if w["id"] == wid), None)
 

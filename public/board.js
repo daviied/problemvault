@@ -110,6 +110,16 @@ export function refreshTexts() {
   dirty.base = true;
 }
 
+// Read-only (the phone app): drag pans, two fingers zoom, nothing draws.
+let readOnly = false;
+let pan = null; // { id, x, y, ox, oy }
+export function setReadOnly(v) {
+  readOnly = v;
+  cancelInput();
+  setSelection(null);
+  stage.classList.toggle('readonly', v);
+}
+
 export function relayout() {
   resize();
   clampView();
@@ -998,7 +1008,7 @@ async function b64(buf) {
 }
 
 document.addEventListener('paste', e => {
-  if (!current || e.target.closest?.('input, textarea, [contenteditable]')) return;
+  if (!current || readOnly || e.target.closest?.('input, textarea, [contenteditable]')) return;
   const file = [...(e.clipboardData?.items || [])].find(i => i.kind === 'file' && i.type.startsWith('image/'))?.getAsFile();
   e.preventDefault();
   if (file) insertImage(file);
@@ -1009,6 +1019,7 @@ stage.addEventListener('dragleave', () => stage.classList.remove('drop'));
 stage.addEventListener('drop', e => {
   e.preventDefault();
   stage.classList.remove('drop');
+  if (readOnly) return;
   for (const f of e.dataTransfer?.files || []) insertImage(f);
 });
 $('#img-file').addEventListener('change', e => {
@@ -1024,15 +1035,36 @@ $('#add-image').onclick = () => $('#img-file').click();
 stage.addEventListener('pointerdown', e => {
   e.preventDefault();
   if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+  if (readOnly) {
+    if (e.pointerType === 'touch') onTouchDown(e);
+    pan = e.pointerType !== 'touch' || touches.size === 1 ? { id: e.pointerId, x: e.clientX, y: e.clientY, ox: view.ox, oy: view.oy } : null;
+    try { stage.setPointerCapture(e.pointerId); } catch {}
+    return;
+  }
   if (e.pointerType === 'touch') onTouchDown(e);
   else onPenDown(e);
 });
 stage.addEventListener('pointermove', e => {
+  if (readOnly) {
+    if (e.pointerType === 'touch') onTouchMove(e);
+    if (pan && e.pointerId === pan.id && !gesture) {
+      view.ox = pan.ox + e.clientX - pan.x;
+      view.oy = pan.oy + e.clientY - pan.y;
+      clampView();
+      dirty.base = dirty.live = true;
+    }
+    return;
+  }
   if (e.pointerType === 'touch') onTouchMove(e);
   else onPenMove(e);
 });
 for (const type of ['pointerup', 'pointercancel']) {
   stage.addEventListener(type, e => {
+    if (readOnly) {
+      if (e.pointerType === 'touch') onTouchUp(e);
+      if (pan?.id === e.pointerId) pan = null;
+      return;
+    }
     if (e.pointerType === 'touch') onTouchUp(e);
     else onPenUp(e);
   });
@@ -1066,7 +1098,7 @@ stage.addEventListener('wheel', e => {
 }, { passive: false });
 
 document.addEventListener('keydown', e => {
-  if (!current || e.target.closest?.('input, textarea, select, [contenteditable]')) return;
+  if (!current || readOnly || e.target.closest?.('input, textarea, select, [contenteditable]')) return;
   const mod = e.ctrlKey || e.metaKey;
   const k = e.key.toLowerCase();
   if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
