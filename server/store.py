@@ -77,6 +77,18 @@ def update_secrets(fields):
         _write(os.path.join(DATA_DIR, "secret.json"), s)
 
 
+def get_settings():
+    """App switches the student sets in the UI (not secrets), e.g. {"inkvault": bool}."""
+    return _read(os.path.join(DATA_DIR, "settings.json"), {})
+
+
+def update_settings(fields):
+    with _lock:
+        s = get_settings()
+        s.update(fields)
+        _write(os.path.join(DATA_DIR, "settings.json"), s)
+
+
 # ---------------------------------------------------------------------------
 # Index: folders and workspaces
 # ---------------------------------------------------------------------------

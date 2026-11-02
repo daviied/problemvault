@@ -97,9 +97,22 @@ $('#login form').onsubmit = async e => {
 
 async function loadState() {
   state = await call('GET', '/api/state');
+  renderInkToggle();
   renderTree();
   renderFolderSelect();
 }
+
+// InkVault notes for Claude: shown once the server is connected to InkVault; on/off for every device
+function renderInkToggle() {
+  const iv = state.inkvault || {};
+  $('#ink-toggle').hidden = !iv.configured;
+  $('#ink-on').checked = !!iv.enabled;
+}
+$('#ink-on').addEventListener('change', async e => {
+  try { state.inkvault = await call('PUT', '/api/inkvault', { enabled: e.target.checked }); }
+  catch (err) { toast(err.message); }
+  renderInkToggle();
+});
 
 // Server-sent events, reconnecting on their own
 function listen(key, onMsg) {
@@ -372,6 +385,9 @@ $('#panel-toggle').onclick = () => setPanel(!$('#main').classList.contains('pane
 // tablet: the page first, the panel is a menu you open
 setPanel(MODE === 'phone' || (MODE === 'desktop' && localStorage.getItem('problemvault.panel') !== '0' && innerWidth > 1100));
 if (MODE === 'phone') board.setReadOnly(true);
+// desktop: no drawing (that is the tablet's job), only select / move / resize and images
+if (MODE === 'desktop') board.setTools(['lasso'], { imagesOnly: true });
+document.documentElement.dataset.mode = MODE;
 
 // ---------------------------------------------------------------------------
 // Problem tab

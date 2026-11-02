@@ -22,7 +22,7 @@ import urllib.parse
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import ask, calcvault, events, mcp, store, webassign
+from . import ask, calcvault, events, inkvault, mcp, store, webassign
 
 PORT = int(os.environ.get("PORT", "8787"))
 HOST = os.environ.get("HOST", "0.0.0.0")
@@ -264,6 +264,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, calcvault.tree())
             except calcvault.CalcVaultError as e:
                 raise HttpError(502, str(e)) from None
+        if head == "inkvault" and parts[1:] == [] and method in ("GET", "PUT"):  # notes for Claude: on/off
+            if method == "PUT":
+                inkvault.set_on(self.json_body().get("enabled"))
+                events.publish("index", {"type": "settings"})
+            return self.send(200, self.inkvault_state())
         if head == "claude":  # Claude Code CLI on this server: status, token, test
             if parts[1:] == [] and method == "GET":
                 return self.send(200, ask.status())
@@ -319,6 +324,10 @@ class Handler(BaseHTTPRequestHandler):
         events.publish("index", {"type": "index"})
         return {"folder": folder["id"], "created": made}
 
+    @staticmethod
+    def inkvault_state():
+        return {"configured": inkvault.configured(), "enabled": inkvault.is_on(), "url": inkvault.URL}
+
     def state(self):
         ix = store.index()
         for w in ix["workspaces"]:
@@ -327,6 +336,7 @@ class Handler(BaseHTTPRequestHandler):
             "index": ix,
             "calcvault": {"enabled": calcvault.enabled(), "url": calcvault.PUBLIC_URL},
             "webassign": {"enabled": webassign.enabled()},
+            "inkvault": self.inkvault_state(),
             "claude": {"cli": ask.available(), **ask.status()},
             "mcp": {"url": f"{self.public_origin()}/mcp", "token": MCP_TOKEN},
         }

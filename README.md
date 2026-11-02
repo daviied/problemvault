@@ -33,6 +33,14 @@ Needs your AssignPad server (the `Web-Assign` project) running. ProblemVault cal
    - Linked: the question with answer boxes. **Save** / **Submit** go to WebAssign; ✓ / ✗ show WebAssign's marks. **Refresh** reads it again. **Use as problem text** copies the question (cheap for Claude). **Add figures to page** puts its images on the page to write on.
 3. Claude: `webassign_read` gives the question and which answers WebAssign marked wrong. Claude cannot submit; you do.
 
+## InkVault notes
+
+Claude can search and read your InkVault class notes (read-only): typed text as text, handwriting as small cropped PNGs.
+
+1. In InkVault, set `AI_PASSWORD`.
+2. In ProblemVault, set `INKVAULT_URL` (for example `https://notes.example.com`) and `INKVAULT_PASSWORD` (the same value).
+3. Claude tab → **Let Claude read my InkVault notes** turns it on or off for all devices. When off, Claude does not get the notes tools.
+
 ## Low token use
 
 Claude pays for an image by its pixel area. ProblemVault never sends screenshots:
@@ -70,7 +78,7 @@ Then ask, e.g. *"check my work on HW4 #2"*. Claude tools: `list_workspaces`, `ge
 1. Push this folder to a GitHub repo named `problemvault`. GitHub Actions builds `ghcr.io/<user>/problemvault:latest` (amd64 + arm64).
 2. GitHub → Packages → `problemvault` → Package settings → make it Public.
 3. If your GitHub user is not `daviied`, change it in `docker-compose.yml`.
-4. CasaOS → App Store → **+** → Install a customized app → Import → paste `docker-compose.yml`. Set `APP_PASSWORD`, `CALCVAULT_PASSWORD` and the `ASSIGNPAD_*` values in the form. (docker compose CLI: copy `.env.example` to `.env`.) Never commit passwords or tokens: the repo is public.
+4. CasaOS → App Store → **+** → Install a customized app → Import → paste `docker-compose.yml`. Set `APP_PASSWORD`, `CALCVAULT_PASSWORD`, the `ASSIGNPAD_*` and the `INKVAULT_*` values in the form. (docker compose CLI: copy `.env.example` to `.env`.) Never commit passwords or tokens: the repo is public.
 5. Open `http://<casaos-ip>:8787` and log in. If `APP_PASSWORD` is empty, the container log shows a generated password.
 
 ## Public, behind nginx
@@ -103,7 +111,7 @@ Python 3.10+, no packages:
 python run.py
 ```
 
-Env (see `.env.example`): `PORT` (8787), `DATA_DIR` (`./data`), `APP_PASSWORD` (generated and printed if unset), `MCP_TOKEN`, `CALCVAULT_URL`, `CALCVAULT_PUBLIC_URL`, `CALCVAULT_PASSWORD`, `ASSIGNPAD_URL`, `ASSIGNPAD_PASSWORD`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CLI`.
+Env (see `.env.example`): `PORT` (8787), `DATA_DIR` (`./data`), `APP_PASSWORD` (generated and printed if unset), `MCP_TOKEN`, `CALCVAULT_URL`, `CALCVAULT_PUBLIC_URL`, `CALCVAULT_PASSWORD`, `ASSIGNPAD_URL`, `ASSIGNPAD_PASSWORD`, `INKVAULT_URL`, `INKVAULT_PASSWORD`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CLI`.
 
 ## Layout
 
@@ -114,6 +122,7 @@ server/render.py     ink + image rasteriser for Claude (pure Python)
 server/store.py      file storage
 server/calcvault.py  CalcVault client
 server/webassign.py  AssignPad (WebAssign) client
+server/inkvault.py   InkVault notes client (read-only)
 server/ask.py        in-app Ask Claude via the Claude Code CLI
 public/              web app (board.js = drawing board, ink.js = InkVault engine)
 mcp_stdio.py         stdio bridge for Claude Desktop

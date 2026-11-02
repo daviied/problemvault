@@ -1,6 +1,6 @@
 // Network-first service worker (as in InkVault): makes ProblemVault installable
 // and lets the shell open instantly; live data always comes from the server.
-const CACHE = 'problemvault-v3';
+const CACHE = 'problemvault-v6';
 const SHELL = ['/', '/tablet', '/phone', '/app.js', '/board.js', '/webassign.js', '/mml2tex.js', '/ink.js', '/app.css', '/manifest.webmanifest', '/manifest-tablet.webmanifest', '/manifest-phone.webmanifest', '/icons/icon-192.png'];
 
 self.addEventListener('install', e => {

@@ -30,6 +30,9 @@ services:
       # WebAssign through AssignPad. Set both to turn it on.
       ASSIGNPAD_URL: ${ASSIGNPAD_URL:-}
       ASSIGNPAD_PASSWORD: ${ASSIGNPAD_PASSWORD:-}
+      # InkVault notes for Claude (read-only). Set both; switch it on/off in the app's Claude tab.
+      INKVAULT_URL: ${INKVAULT_URL:-}
+      INKVAULT_PASSWORD: ${INKVAULT_PASSWORD:-}
       # Optional: Claude subscription token for the in-app Ask Claude button (from `claude setup-token`).
       # You can also paste it in the app instead (plug icon).
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
@@ -59,6 +62,12 @@ services:
         - container: ASSIGNPAD_PASSWORD
           description:
             en_us: AssignPad APP_PASSWORD (empty = WebAssign link off)
+        - container: INKVAULT_URL
+          description:
+            en_us: InkVault address the server uses, e.g. https://notes.example.com
+        - container: INKVAULT_PASSWORD
+          description:
+            en_us: InkVault AI_PASSWORD (empty = notes link off)
       ports:
         - container: "8787"
           description:

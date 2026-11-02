@@ -10,7 +10,7 @@ import datetime
 import json
 import math
 
-from . import calcvault, events, render, store, webassign
+from . import calcvault, events, inkvault, render, store, webassign
 
 PROTOCOL = "2025-06-18"
 INSTRUCTIONS = """ProblemVault holds a student's homework: one workspace per problem, each a page of
@@ -25,7 +25,9 @@ next to their work. To work WITH them on the page itself, use write (typed text/
 block or at x/y) and draw (arrows, circles, underlines, ticks, crosses), both live and in your own
 colour; clean up with remove_marks. When checking work that has a linked CalcVault calculator, call
 calcvault_read each time (it is always fresh) and compare its values with the page. If a WebAssign
-question is linked, webassign_read shows the real question and which answers WebAssign marked wrong. Help them learn: point at the step that's wrong, don't just hand
+question is linked, webassign_read shows the real question and which answers WebAssign marked wrong.
+When the inkvault_* tools are listed, the student's class notes are there: inkvault_search them for the
+method or formula the class used, then inkvault_read the best note. Help them learn: point at the step that's wrong, don't just hand
 over answers unless asked."""
 
 S = {"type": "string"}
@@ -74,6 +76,20 @@ TOOLS = [
     {"name": "calcvault_add_lines", "description": "Append lines to the workspace's CalcVault calculator (creates and links one if none). Lines: {latex} for an equation such as 'R_1=4' or 'I=\\\\frac{V}{R_1}'; {role:'input', var, label, value}; {role:'output', label, latex}. The student's CalcVault computes the values.",
      "inputSchema": {"type": "object", "properties": {"workspace": WS, "lines": {"type": "array", "items": {"type": "object"}}}, "required": ["workspace", "lines"]}},
 ]
+
+# listed only while InkVault is connected and switched on
+INKVAULT_TOOLS = [
+    {"name": "inkvault_search", "description": "Search the student's InkVault class notes (typed text) for words. Returns note paths with matching lines. Without q, lists every note with when it changed.",
+     "inputSchema": {"type": "object", "properties": {"q": {"type": "string", "description": "Words to find; omit to list all notes"}}}},
+    {"name": "inkvault_read", "description": "One InkVault note: its Markdown text, plus its handwriting (cropped to the ink, ~200-400 tokens each) and photos as images, in note order. Use images=false for the text only.",
+     "inputSchema": {"type": "object", "properties": {"path": {"type": "string", "description": "Note path from inkvault_search"},
+                                                      "images": {"type": "boolean", "description": "Include handwriting and photos (default true)"},
+                                                      "max_images": {"type": "integer", "description": "Default 6, max 12"}}, "required": ["path"]}},
+]
+
+
+def tools():
+    return TOOLS + (INKVAULT_TOOLS if inkvault.enabled() else [])
 
 
 class ToolError(Exception):
@@ -546,6 +562,47 @@ def t_calcvault_add_lines(args):
     return f"Added {len(lines)} line(s) to {c['name']}. CalcVault shows their computed values."
 
 
+def t_inkvault_search(args):
+    q = (args.get("q") or "").strip()
+    try:
+        if not q:
+            ns = inkvault.notes()
+            return f"{len(ns)} notes:\n" + "\n".join(f"- {n['path']} ({str(n.get('modified') or '')[:10]})" for n in ns[:300])
+        res = inkvault.search(q)
+    except inkvault.InkVaultError as e:
+        raise ToolError(str(e)) from None
+    if not res:
+        return f"No typed text matches '{q}' (handwriting is not searchable; try other words or list all notes)."
+    out = []
+    for r in res[:20]:
+        out.append(f"{r['path']}:")
+        out += [f"  {h['line']}: {h['text'][:200]}" for h in r.get("hits", [])[:5]]
+    return "\n".join(out)
+
+
+def t_inkvault_read(args):
+    try:
+        n = inkvault.note(str(args.get("path") or ""))
+    except inkvault.InkVaultError as e:
+        raise ToolError(str(e)) from None
+    text = n.get("text") or ""
+    embeds = [e for e in n.get("embeds", []) if not e.get("empty")]
+    content = [{"type": "text", "text": f"# {n['path']}\n\n{text[:20000]}"}]
+    if args.get("images", True) and embeds:
+        limit = max(1, min(12, int(args.get("max_images") or 6)))
+        for e in embeds[:limit]:
+            try:
+                data, mime = inkvault.embed(e["url"], width=700)
+            except inkvault.InkVaultError:
+                continue
+            if mime in ("image/png", "image/jpeg", "image/gif", "image/webp") and len(data) <= 1_500_000:
+                content.append({"type": "text", "text": f"{e['kind']} ![[{e['embed']}]]:"})
+                content.append({"type": "image", "data": base64.b64encode(data).decode(), "mimeType": mime})
+        if len(embeds) > limit:
+            content.append({"type": "text", "text": f"({len(embeds) - limit} more embeds; call again with a larger max_images)"})
+    return content
+
+
 HANDLERS = {name[2:]: fn for name, fn in globals().items() if name.startswith("t_")}
 
 
@@ -569,7 +626,7 @@ def handle(msg):
         elif method == "ping":
             result = {}
         elif method == "tools/list":
-            result = {"tools": TOOLS}
+            result = {"tools": tools()}
         elif method == "tools/call":
             p = msg.get("params") or {}
             fn = HANDLERS.get(p.get("name"))

@@ -40,8 +40,22 @@ function load() {
   try { return JSON.parse(localStorage.getItem('problemvault.board') || '{}'); } catch { return {}; }
 }
 function save() {
-  try { localStorage.setItem('problemvault.board', JSON.stringify(settings)); } catch {}
+  // a tool forced by setTools (desktop) is not remembered, so /tablet in the same browser keeps its own
+  try { localStorage.setItem('problemvault.board', JSON.stringify({ ...settings, tool: chosenTool })); } catch {}
 }
+let chosenTool = settings.tool;
+let allowedTools = null; // null = every tool
+
+// Limit the toolbar (the desktop app only selects, moves and adds images).
+let imagesOnly = false; // desktop: the lasso picks only images, and a click on an image grabs it
+export function setTools(list, opts = {}) {
+  allowedTools = list;
+  imagesOnly = !!opts.imagesOnly;
+  document.querySelectorAll('[data-tool]').forEach(b => { b.hidden = !list.includes(b.dataset.tool); });
+  if (!list.includes(settings.tool)) settings.tool = list[0];
+  renderToolbar();
+}
+const toolAllowed = t => !allowedTools || allowedTools.includes(t);
 
 // ---------------------------------------------------------------------------
 // DOM
@@ -160,7 +174,7 @@ function resize() {
 
 function fitWidth() {
   const margin = stageRect.width > 700 ? 24 : 10;
-  view.scale = Math.min((stageRect.width - margin * 2) / PAGE_WIDTH, 1.6);
+  view.scale = clamp((stageRect.width - margin * 2) / PAGE_WIDTH, 0.1, 1.6); // a hidden stage has width 0
   view.ox = (stageRect.width - PAGE_WIDTH * view.scale) / 2;
   view.oy = margin;
   dirty.base = dirty.live = true;
@@ -418,7 +432,7 @@ function onPenDown(e) {
     typeText(p);
     return;
   }
-  if (settings.tool === 'eraser' || isPenEraser(e)) {
+  if (settings.tool === 'eraser' || (isPenEraser(e) && toolAllowed('eraser'))) {
     input = { kind: 'erase', pointerId: e.pointerId, last: p, removed: new Map(), added: new Map() };
     eraseTo(p);
   } else if (settings.tool === 'lasso') {
@@ -433,6 +447,10 @@ function onPenDown(e) {
     } else if (b && p[0] >= b.minX && p[0] <= b.maxX && p[1] >= b.minY && p[1] <= b.maxY) {
       input = { kind: 'move', pointerId: e.pointerId, start: p, dx: 0, dy: 0 };
       dirty.base = true; // take the selection off the base layer while it moves
+    } else if (imagesOnly && imageAt(p[0], p[1])) {
+      setSelection(null, new Set([imageAt(p[0], p[1]).id]));
+      input = { kind: 'move', pointerId: e.pointerId, start: p, dx: 0, dy: 0 };
+      dirty.base = true;
     } else {
       setSelection(null);
       input = { kind: 'lasso', pointerId: e.pointerId, pts: [p] };
@@ -454,7 +472,8 @@ function onPenMove(e) {
   if (!input || e.pointerId !== input.pointerId) {
     if (!input && e.pointerType !== 'touch' && current) {
       stageRect = stage.getBoundingClientRect();
-      hover = Object.assign(pagePoint(e), { eraser: settings.tool === 'eraser' || isPenEraser(e) });
+      hover = Object.assign(pagePoint(e), { eraser: settings.tool === 'eraser' || (isPenEraser(e) && toolAllowed('eraser')) });
+      if (imagesOnly) stage.classList.toggle('over-img', !!imageAt(hover[0], hover[1]));
       dirty.live = true;
     }
     return;
@@ -622,7 +641,7 @@ function startGesture() {
 function updateGesture() {
   const g = twoTouches();
   const s0 = gesture.view.scale;
-  const fit = (stageRect.width - 20) / PAGE_WIDTH;
+  const fit = Math.max(0.1, (stageRect.width - 20) / PAGE_WIDTH);
   const s = clamp(s0 * (g.d / gesture.d), fit * 0.5, fit * 6);
   const px = (gesture.cx - stageRect.left - gesture.view.ox) / s0;
   const py = (gesture.cy - stageRect.top - gesture.view.oy) / s0;
@@ -715,6 +734,14 @@ function imageAt(x, y) {
 function finishLasso(pts) {
   let span = 0;
   for (const p of pts) span = Math.max(span, Math.hypot(p[0] - pts[0][0], p[1] - pts[0][1]));
+  if (imagesOnly) {
+    const [x, y] = pts[0];
+    const imgs = span < 8 ? new Set(imageAt(x, y) ? [imageAt(x, y).id] : [])
+      : new Set(current.drawing.images.filter(i => insidePolygon(i.x + i.w / 2, i.y + i.h / 2, pts)).map(i => i.id));
+    setSelection(null, imgs);
+    if (!imgs.size && span >= 8) api.toast('No images selected');
+    return;
+  }
   if (span < 8) {
     // a tap: select the stroke under the pen, or else the image under it
     const [x, y] = pts[0];
@@ -1082,7 +1109,7 @@ stage.addEventListener('wheel', e => {
   e.preventDefault();
   if (e.ctrlKey) {
     const s0 = view.scale;
-    const fit = (stageRect.width - 20) / PAGE_WIDTH;
+    const fit = Math.max(0.1, (stageRect.width - 20) / PAGE_WIDTH);
     const s = clamp(s0 * Math.exp(-e.deltaY * 0.01), fit * 0.5, fit * 6);
     const px = (e.clientX - stageRect.left - view.ox) / s0;
     const py = (e.clientY - stageRect.top - view.oy) / s0;
@@ -1119,7 +1146,9 @@ document.addEventListener('keydown', e => {
 // ---------------------------------------------------------------------------
 
 function selectTool(tool) {
+  if (!toolAllowed(tool)) return;
   settings.tool = tool;
+  chosenTool = tool;
   if (tool !== 'lasso') setSelection(null);
   save();
   renderToolbar();
@@ -1127,6 +1156,7 @@ function selectTool(tool) {
 
 function renderToolbar() {
   document.querySelectorAll('[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === settings.tool));
+  stage.dataset.activeTool = settings.tool; // CSS: the system cursor shows unless a pen-like tool draws its own
   const tool = settings.tool;
   const colors = $('#colors');
   colors.innerHTML = '';
