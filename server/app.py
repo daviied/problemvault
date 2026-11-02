@@ -22,7 +22,7 @@ import urllib.parse
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import ask, calcvault, events, mcp, store
+from . import ask, calcvault, events, mcp, store, webassign
 
 PORT = int(os.environ.get("PORT", "8787"))
 HOST = os.environ.get("HOST", "0.0.0.0")
@@ -257,6 +257,8 @@ class Handler(BaseHTTPRequestHandler):
             if not w:
                 raise HttpError(404, "No such workspace")
             return self.ws(method, w, parts[2:], qs)
+        if head == "webassign":
+            return self.webassign(method, parts[1:], qs)
         if head == "calcvault" and parts[1:] == ["tree"]:
             try:
                 return self.send(200, calcvault.tree())
@@ -273,6 +275,50 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, {"ok": ok, "message": msg, **ask.status()})
         raise HttpError(404, "Not found")
 
+    def webassign(self, method, rest, qs):
+        """WebAssign through AssignPad: list, view, save/submit, images, import as problems."""
+        refresh = qs.get("refresh") == "1"
+        try:
+            if rest == ["assignments"] and method == "GET":
+                return self.send(200, webassign.assignments(refresh))
+            if len(rest) == 2 and rest[0] == "assignments" and method == "GET":
+                a = webassign.assignment(rest[1], refresh)
+                return self.send(200, {**a, "url": a.get("url") or webassign.open_url(rest[1])})
+            if len(rest) == 4 and rest[0] == "assignments" and rest[2] == "questions" and method == "POST":
+                b = self.json_body()
+                answers = b.get("answers") if isinstance(b.get("answers"), dict) else {}
+                return self.send(200, webassign.submit(rest[1], rest[3], answers, b.get("action")))
+            if rest == ["proxy"] and method == "GET":
+                data, ctype = webassign.proxy(qs.get("u", ""))
+                if ctype.split(";")[0].strip() not in ("image/png", "image/jpeg", "image/gif", "image/svg+xml", "image/webp", "text/css"):
+                    raise HttpError(415, "Not an image or stylesheet")
+                return self.send(200, data, ctype, {"Cache-Control": "private, max-age=604800"})
+            if rest == ["import"] and method == "POST":
+                return self.send(200, self.wa_import(self.json_body()))
+        except webassign.WebAssignError as e:
+            raise HttpError(502, str(e)) from None
+        raise HttpError(404, "Not found")
+
+    def wa_import(self, b):
+        """One problem per question of an assignment, in a folder named after it."""
+        dep = str(b.get("dep", ""))
+        a = webassign.assignment(dep)
+        parent = b.get("folder") or None
+        ix = store.index()
+        folder = (next((f for f in ix["folders"] if f["name"] == a["name"] and f.get("parent") == parent), None)
+                  or store.create_folder(a["name"], parent))
+        linked = {(w.get("wa") or {}).get("box") for w in ix["workspaces"] if (w.get("wa") or {}).get("dep") == dep}
+        made = []
+        for q in a.get("questions", []):
+            if q["box"] in linked:
+                continue  # imported before
+            w = store.create_workspace(f"{a['name']} #{q['number']}", folder["id"])
+            store.update_workspace(w["id"], {"problem": webassign.question_text(q),
+                                             "wa": {"dep": dep, "box": q["box"], "name": a["name"], "number": q["number"]}})
+            made.append(w["id"])
+        events.publish("index", {"type": "index"})
+        return {"folder": folder["id"], "created": made}
+
     def state(self):
         ix = store.index()
         for w in ix["workspaces"]:
@@ -280,6 +326,7 @@ class Handler(BaseHTTPRequestHandler):
         return {
             "index": ix,
             "calcvault": {"enabled": calcvault.enabled(), "url": calcvault.PUBLIC_URL},
+            "webassign": {"enabled": webassign.enabled()},
             "claude": {"cli": ask.available(), **ask.status()},
             "mcp": {"url": f"{self.public_origin()}/mcp", "token": MCP_TOKEN},
         }

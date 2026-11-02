@@ -10,7 +10,7 @@ import datetime
 import json
 import math
 
-from . import calcvault, events, render, store
+from . import calcvault, events, render, store, webassign
 
 PROTOCOL = "2025-06-18"
 INSTRUCTIONS = """ProblemVault holds a student's homework: one workspace per problem, each a page of
@@ -24,7 +24,8 @@ already transcribed context. Answer the student with post_note (Markdown, $LaTeX
 next to their work. To work WITH them on the page itself, use write (typed text/LaTeX placed beside a
 block or at x/y) and draw (arrows, circles, underlines, ticks, crosses), both live and in your own
 colour; clean up with remove_marks. When checking work that has a linked CalcVault calculator, call
-calcvault_read each time (it is always fresh) and compare its values with the page. Help them learn: point at the step that's wrong, don't just hand
+calcvault_read each time (it is always fresh) and compare its values with the page. If a WebAssign
+question is linked, webassign_read shows the real question and which answers WebAssign marked wrong. Help them learn: point at the step that's wrong, don't just hand
 over answers unless asked."""
 
 S = {"type": "string"}
@@ -66,6 +67,8 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"workspace": WS, "title": S, "status": {"type": "string", "enum": list(store.STATUSES)}, "problem": S}, "required": ["workspace"]}},
     {"name": "create_workspace", "description": "Create a workspace for a new problem, optionally in a folder (folder name or id; created if missing).",
      "inputSchema": {"type": "object", "properties": {"title": S, "folder": S, "problem": S}, "required": ["title"]}},
+    {"name": "webassign_read", "description": "The WebAssign question linked to this workspace (text with $LaTeX$), the state of each answer box (correct / incorrect / empty, locked), and its figures (circuits, graphs) as images. Fresh from WebAssign. Read-only: the student submits answers themselves. Use figures=false when you already saw them (saves tokens).",
+     "inputSchema": {"type": "object", "properties": {"workspace": WS, "figures": {"type": "boolean", "description": "Include the question's figures (default true)"}}, "required": ["workspace"]}},
     {"name": "calcvault_read", "description": "Lines of the CalcVault calculator linked to this workspace (LaTeX).",
      "inputSchema": {"type": "object", "properties": {"workspace": WS}, "required": ["workspace"]}},
     {"name": "calcvault_add_lines", "description": "Append lines to the workspace's CalcVault calculator (creates and links one if none). Lines: {latex} for an equation such as 'R_1=4' or 'I=\\\\frac{V}{R_1}'; {role:'input', var, label, value}; {role:'output', label, latex}. The student's CalcVault computes the values.",
@@ -172,6 +175,8 @@ def t_get_workspace(args):
     if mine:
         out.append(f"\nYour drawn marks still on the page: {', '.join(sorted(mine))}")
     out.append(f"\nPage: 1000 wide, {round(page['height'])} tall; content ends near y{round(_content_bottom(page))}.")
+    if w.get("wa"):
+        out.append(f"\nWebAssign: {w['wa']['name']} question {w['wa']['number']} — webassign_read for the question and answer status")
     if w.get("calc"):
         out.append(f"\nCalcVault calculator: {w['calc']['name']} (id {w['calc']['id']}) — calcvault_read for its lines")
     open_q = [q for q in c["questions"] if not q.get("answered")]
@@ -501,6 +506,22 @@ def _calc_for(w, create=False):
     store.update_workspace(w["id"], {"calc": {"id": c["id"], "name": c["name"]}})
     events.publish(w["id"], {"type": "meta"})
     return c["id"]
+
+
+def t_webassign_read(args):
+    w = _ws(args)
+    if not w.get("wa"):
+        raise ToolError("No WebAssign question is linked to this workspace.")
+    try:
+        a, q = webassign.question(w["wa"]["dep"], w["wa"]["box"], refresh=True)
+    except webassign.WebAssignError as e:
+        raise ToolError(str(e)) from None
+    content = [{"type": "text", "text": webassign.summarize(a, q)}]
+    if args.get("figures", True):
+        for i, (data, mime) in enumerate(webassign.figures(q), 1):
+            content.append({"type": "text", "text": f"Figure {i}:"})
+            content.append({"type": "image", "data": base64.b64encode(data).decode(), "mimeType": mime})
+    return content
 
 
 def t_calcvault_read(args):

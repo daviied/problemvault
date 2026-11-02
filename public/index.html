@@ -100,6 +100,7 @@
           <div class="tabs">
             <button data-tab="problem" class="on">Problem</button>
             <button data-tab="claude">Claude <span id="claude-badge" hidden></span></button>
+            <button data-tab="wa">WebAssign</button>
             <button data-tab="calc">CalcVault</button>
           </div>
 
@@ -137,6 +138,27 @@
                 <button id="forget-btn" class="subtle">Make Claude re-read</button>
               </div>
             </details>
+          </div>
+
+          <div class="tab" id="tab-wa" hidden>
+            <div id="wa-off" hidden>
+              <p>WebAssign isn't connected. Run AssignPad and start ProblemVault with <code>ASSIGNPAD_URL</code> and <code>ASSIGNPAD_PASSWORD</code> (see README).</p>
+            </div>
+            <div id="wa-on" hidden>
+              <div id="wa-linked" hidden>
+                <div class="calc-head"><strong id="wa-title"></strong><span class="grow"></span>
+                  <a id="wa-open" target="_blank" rel="noopener">Open ↗</a>
+                  <button id="wa-refresh" class="subtle" title="Read the question again from WebAssign">Refresh</button>
+                  <button id="wa-unlink" class="subtle">Unlink</button></div>
+                <div id="wa-question"></div>
+              </div>
+              <div id="wa-browse" hidden>
+                <div class="calc-head"><button id="wa-back" class="subtle" hidden>←</button><strong id="wa-browse-title">Assignments</strong><span class="grow"></span>
+                  <button id="wa-list-refresh" class="subtle">Refresh</button></div>
+                <p class="muted small">Link a WebAssign question to this problem, or import a whole assignment.</p>
+                <div id="wa-items"></div>
+              </div>
+            </div>
           </div>
 
           <div class="tab" id="tab-calc" hidden>

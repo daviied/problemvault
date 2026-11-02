@@ -225,6 +225,11 @@ def update_workspace(wid, fields):
         if "calc" in fields:
             c = fields["calc"]
             w["calc"] = {"id": int(c["id"]), "name": str(c.get("name", ""))[:200]} if c else None
+        if "wa" in fields:  # linked WebAssign question (through AssignPad)
+            a = fields["wa"]
+            ok = a and str(a.get("dep", "")).isdigit() and re.fullmatch(r"question\d+_\d+", str(a.get("box", "")))
+            w["wa"] = {"dep": str(a["dep"]), "box": a["box"], "name": str(a.get("name", ""))[:200],
+                       "number": int(a.get("number") or 0)} if ok else None
         w["updated"] = now_ms()
         _save_index(ix)
         return w

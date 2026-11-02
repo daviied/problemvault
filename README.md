@@ -7,6 +7,7 @@ Homework workspaces. One page per problem: paste the circuit or equation, work i
 - **Text**: Text tool (T). Tap to type, `$…$` for math (KaTeX).
 - **Organised**: folders (course → assignment) with problems, drag to move, status (to do / working / done), search.
 - **CalcVault**: link a calculator per problem. Claude can put your givens and equations into it.
+- **WebAssign** (through AssignPad): view the real question, answer it (MathLive) and Save / Submit, without leaving the problem. Import an assignment as one problem per question; put the question's figures on the page.
 - **Claude**: MCP server at `/mcp`. Claude reads your ink, posts notes in the side panel, and writes and draws on the page with you, live.
 - **PWA**: install it from the browser on laptop or phone (needs https, or localhost).
 
@@ -21,6 +22,16 @@ Open each address on its device and install it (browser menu → Install / Add t
 | Phone | `/phone` | Problems, Claude, CalcVault, plus a small read-only view of the page (drag to pan, pinch to zoom) |
 
 **Follow** (toolbar and sidebar): when you open a problem on one device, the other devices with Follow on open it too. Turn it off on a device to work on a different problem there. Ink, text and Claude's notes sync live on all devices.
+
+## WebAssign
+
+Needs your AssignPad server (the `Web-Assign` project) running. ProblemVault calls its API with its password; your Cengage login stays only in AssignPad.
+
+1. Set `ASSIGNPAD_URL` (for example `http://192.168.1.20:8080`) and `ASSIGNPAD_PASSWORD` (AssignPad's `APP_PASSWORD`).
+2. Panel → **WebAssign**:
+   - No question linked: pick an assignment, then **Link here** on a question, or **Import all as problems** (a folder named after the assignment, one problem per question, problem text filled in).
+   - Linked: the question with answer boxes. **Save** / **Submit** go to WebAssign; ✓ / ✗ show WebAssign's marks. **Refresh** reads it again. **Use as problem text** copies the question (cheap for Claude). **Add figures to page** puts its images on the page to write on.
+3. Claude: `webassign_read` gives the question and which answers WebAssign marked wrong. Claude cannot submit; you do.
 
 ## Low token use
 
@@ -44,7 +55,7 @@ Click the plug icon in the sidebar for your URL and token, then:
   ```
 - **claude.ai** (web / phone): Settings → Connectors → Add custom connector, URL `https://<public-host>/mcp/<token>`. Needs ProblemVault on the internet over https (reverse proxy or tunnel).
 
-Then ask, e.g. *"check my work on HW4 #2"*. Claude tools: `list_workspaces`, `get_workspace`, `view_ink`, `save_transcription`, `describe_image`, `post_note`, `write`, `draw`, `remove_marks`, `update_workspace`, `create_workspace`, `calcvault_read`, `calcvault_add_lines`.
+Then ask, e.g. *"check my work on HW4 #2"*. Claude tools: `list_workspaces`, `get_workspace`, `view_ink`, `save_transcription`, `describe_image`, `post_note`, `write`, `draw`, `remove_marks`, `update_workspace`, `create_workspace`, `webassign_read`, `calcvault_read`, `calcvault_add_lines`.
 
 **Ask Claude** in the side panel:
 - The Docker image includes Claude Code. Log it in once:
@@ -59,7 +70,7 @@ Then ask, e.g. *"check my work on HW4 #2"*. Claude tools: `list_workspaces`, `ge
 1. Push this folder to a GitHub repo named `problemvault`. GitHub Actions builds `ghcr.io/<user>/problemvault:latest` (amd64 + arm64).
 2. GitHub → Packages → `problemvault` → Package settings → make it Public.
 3. If your GitHub user is not `daviied`, change it in `docker-compose.yml`.
-4. CasaOS → App Store → **+** → Install a customized app → Import → paste `docker-compose.yml`. Set `APP_PASSWORD` and `CALCVAULT_PASSWORD`.
+4. CasaOS → App Store → **+** → Install a customized app → Import → paste `docker-compose.yml`. Set `APP_PASSWORD`, `CALCVAULT_PASSWORD` and the `ASSIGNPAD_*` values in the form. (docker compose CLI: copy `.env.example` to `.env`.) Never commit passwords or tokens: the repo is public.
 5. Open `http://<casaos-ip>:8787` and log in. If `APP_PASSWORD` is empty, the container log shows a generated password.
 
 ## Public, behind nginx
@@ -92,7 +103,7 @@ Python 3.10+, no packages:
 python run.py
 ```
 
-Env: `PORT` (8787), `DATA_DIR` (`./data`), `APP_PASSWORD` (generated and printed if unset), `MCP_TOKEN`, `CALCVAULT_URL`, `CALCVAULT_PUBLIC_URL`, `CALCVAULT_PASSWORD`, `CLAUDE_CLI`.
+Env (see `.env.example`): `PORT` (8787), `DATA_DIR` (`./data`), `APP_PASSWORD` (generated and printed if unset), `MCP_TOKEN`, `CALCVAULT_URL`, `CALCVAULT_PUBLIC_URL`, `CALCVAULT_PASSWORD`, `ASSIGNPAD_URL`, `ASSIGNPAD_PASSWORD`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CLI`.
 
 ## Layout
 
@@ -102,6 +113,7 @@ server/mcp.py        MCP tools for Claude
 server/render.py     ink + image rasteriser for Claude (pure Python)
 server/store.py      file storage
 server/calcvault.py  CalcVault client
+server/webassign.py  AssignPad (WebAssign) client
 server/ask.py        in-app Ask Claude via the Claude Code CLI
 public/              web app (board.js = drawing board, ink.js = InkVault engine)
 mcp_stdio.py         stdio bridge for Claude Desktop

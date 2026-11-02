@@ -8,6 +8,7 @@
 //   phone    /phone   problems, Claude, CalcVault, and a read-only view of the page
 // Devices with Follow on all open the problem last opened on any of them.
 import * as board from './board.js';
+import * as webassign from './webassign.js';
 
 const $ = s => document.querySelector(s);
 const clientId = Math.random().toString(36).slice(2, 10);
@@ -181,6 +182,7 @@ async function openWorkspace(id, push = true, { announce = true } = {}) {
   renderMeta();
   renderClaude();
   renderCalc();
+  if (currentTab() === 'wa') webassign.render();
   renderTree();
   wsEvents?.close();
   wsEvents = listen(id, onWsEvent);
@@ -201,9 +203,11 @@ async function onWsEvent(m) {
     }
   } else if (m.type === 'meta') {
     const d = await call('GET', `/api/ws/${ws.meta.id}`);
+    const relink = JSON.stringify(d.meta.wa) !== JSON.stringify(ws.meta.wa);
     ws.meta = d.meta;
     renderMeta();
     renderCalc();
+    if (relink) webassign.render();
   } else if (m.type === 'calc') renderCalc();
   else if (m.type === 'ask') {
     const el = $('#ask-state');
@@ -350,6 +354,7 @@ function showTab(tab) {
   document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   document.querySelectorAll('.tab').forEach(t => { t.hidden = t.id !== `tab-${tab}`; });
   if (tab === 'claude') $('#claude-badge').hidden = true;
+  if (tab === 'wa' && ws) webassign.render();
   localStorage.setItem('problemvault.tab', tab);
 }
 document.querySelectorAll('.tabs button').forEach(b => { b.onclick = () => showTab(b.dataset.tab); });
@@ -565,6 +570,15 @@ $('#calc-pick').onchange = async e => {
 };
 $('#calc-unlink').onclick = () => call('DELETE', `/api/ws/${ws.meta.id}/calc`);
 $('#calc-refresh').onclick = () => renderCalc();
+
+webassign.init({
+  call, toast, esc,
+  getWs: () => ws,
+  enabled: () => !!state?.webassign?.enabled,
+  insertImage: f => board.insertImage(f),
+  loadState: () => loadState(),
+  openWorkspace: id => openWorkspace(id),
+});
 
 // ---------------------------------------------------------------------------
 // Connect dialog
