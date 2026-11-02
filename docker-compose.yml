@@ -1,0 +1,77 @@
+# ProblemVault for CasaOS (or any Docker host).
+# CasaOS: App Store → "+" (top right) → Install a customized app → Import → paste this file.
+name: problemvault
+
+services:
+  problemvault:
+    image: ghcr.io/daviied/problemvault:latest
+    container_name: problemvault
+    restart: unless-stopped
+    ports:
+      - target: 8787
+        published: "8787"
+        protocol: tcp
+    volumes:
+      # Your problems, drawings, images and Claude's notes. Back this folder up.
+      - type: bind
+        source: /DATA/AppData/problemvault/data
+        target: /data
+    environment:
+      # Login password (always required). Empty = a random one is made; see the container log.
+      APP_PASSWORD: ""
+      # Token Claude uses to connect (MCP). Empty = generated on first start, shown in the app (plug icon).
+      MCP_TOKEN: ""
+      # CalcVault link. Set the password to turn it on.
+      CALCVAULT_URL: "https://e-calc.vantage-hosting.com"
+      CALCVAULT_PUBLIC_URL: "https://e-calc.vantage-hosting.com"
+      CALCVAULT_PASSWORD: ""
+      # Optional: Claude subscription token for the in-app Ask Claude button (from `claude setup-token`).
+      # You can also paste it in the app instead (plug icon).
+      CLAUDE_CODE_OAUTH_TOKEN: ""
+    x-casaos:
+      envs:
+        - container: CLAUDE_CODE_OAUTH_TOKEN
+          description:
+            en_us: Optional Claude subscription token for Ask Claude (or paste it in the app)
+        - container: APP_PASSWORD
+          description:
+            en_us: Login password (empty = random one, shown in the container log)
+        - container: MCP_TOKEN
+          description:
+            en_us: Optional fixed token for Claude's connector (empty = generated)
+        - container: CALCVAULT_URL
+          description:
+            en_us: CalcVault address the server uses
+        - container: CALCVAULT_PUBLIC_URL
+          description:
+            en_us: CalcVault address your browser opens
+        - container: CALCVAULT_PASSWORD
+          description:
+            en_us: CalcVault password (empty = CalcVault link off)
+      ports:
+        - container: "8787"
+          description:
+            en_us: Web UI and Claude MCP endpoint (/mcp)
+      volumes:
+        - container: /data
+          description:
+            en_us: Problems, drawings, images, Claude notes
+
+x-casaos:
+  architectures:
+    - amd64
+    - arm64
+  main: problemvault
+  author: daviied
+  developer: daviied
+  category: Productivity
+  title:
+    en_us: ProblemVault
+  tagline:
+    en_us: Draw over your homework, check it with Claude
+  description:
+    en_us: One workspace per homework problem. Paste the circuit or equation, work it out on top with pen ink (InkVault engine), link a CalcVault calculator, and let Claude read, mark up and comment on your work through MCP on your Claude subscription.
+  icon: https://raw.githubusercontent.com/daviied/problemvault/main/public/icons/icon-512.png
+  port_map: "8787"
+  index: /
+  scheme: http
