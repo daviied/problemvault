@@ -333,8 +333,10 @@ def t_describe_image(args):
     return "Saved image description."
 
 
-def post_note(wid, md, answers=None):
+def post_note(wid, md, answers=None, by=None):
     note = {"id": store.new_id(), "at": store.now_ms(), "md": str(md)[:40000]}
+    if by == "gemini":
+        note["by"] = "gemini"
     if answers:
         note["reply_to"] = answers
 

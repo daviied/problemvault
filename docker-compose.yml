@@ -36,6 +36,9 @@ services:
       # Optional: Claude subscription token for the in-app Ask Claude button (from `claude setup-token`).
       # You can also paste it in the app instead (plug icon).
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # Optional: Gemini API key, backup when the Claude limit is used up. You can also paste it in the app.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-flash-latest}
     x-casaos:
       envs:
         - container: CLAUDE_CODE_OAUTH_TOKEN
@@ -68,6 +71,12 @@ services:
         - container: INKVAULT_PASSWORD
           description:
             en_us: InkVault AI_PASSWORD (empty = notes link off)
+        - container: GEMINI_API_KEY
+          description:
+            en_us: Gemini API key, backup when the Claude limit is used up (optional; can be set in the app)
+        - container: GEMINI_MODEL
+          description:
+            en_us: Gemini model (default gemini-flash-latest)
       ports:
         - container: "8787"
           description:

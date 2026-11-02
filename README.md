@@ -72,7 +72,19 @@ Then ask, e.g. *"check my work on HW4 #2"*. Claude tools: `list_workspaces`, `ge
   2. App → plug icon → **Claude in this app** → paste → **Save** → **Test**.
   - Or set `CLAUDE_CODE_OAUTH_TOKEN` in the compose file, or run `docker exec -it problemvault claude` and `/login` (kept on the data volume).
 - Then Ask Claude runs `claude -p` with only these tools. It uses your plan; `ANTHROPIC_API_KEY` is never passed.
-- Not logged in: it saves the question and copies a one-line prompt to paste into any connected Claude app.
+- Not logged in (and no Gemini key): it saves the question and copies a one-line prompt to paste into any connected Claude app.
+
+## Gemini backup
+
+When your Claude limit is used up, Gemini can answer Ask Claude, **Check with Claude**, **Next step** and **Submit** with the same tools. Gemini uses an API key (Google's free tier, or pay per use).
+
+1. Make a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
+2. Plug icon → **Gemini backup** → paste → **Save** → **Test**. Or set `GEMINI_API_KEY` (and `GEMINI_MODEL`, default `gemini-flash-latest`).
+3. Claude tab → **AI**:
+   - **Auto** (default): Claude answers. If Claude Code says the limit is reached, ProblemVault reads the reset time, Gemini answers that request, and Gemini answers until the reset. Then Claude answers again. If the reset time is not given, it tries Claude again after 1 hour.
+   - **Claude** or **Gemini**: always that one.
+
+Notes from Gemini show "Gemini" in the Claude panel.
 
 ## Run on CasaOS
 
@@ -112,7 +124,7 @@ Python 3.10+, no packages:
 python run.py
 ```
 
-Env (see `.env.example`): `PORT` (8787), `DATA_DIR` (`./data`), `APP_PASSWORD` (generated and printed if unset), `MCP_TOKEN`, `CALCVAULT_URL`, `CALCVAULT_PUBLIC_URL`, `CALCVAULT_PASSWORD`, `ASSIGNPAD_URL`, `ASSIGNPAD_PASSWORD`, `INKVAULT_URL`, `INKVAULT_PASSWORD`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CLI`.
+Env (see `.env.example`): `PORT` (8787), `DATA_DIR` (`./data`), `APP_PASSWORD` (generated and printed if unset), `MCP_TOKEN`, `CALCVAULT_URL`, `CALCVAULT_PUBLIC_URL`, `CALCVAULT_PASSWORD`, `ASSIGNPAD_URL`, `ASSIGNPAD_PASSWORD`, `INKVAULT_URL`, `INKVAULT_PASSWORD`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CLI`, `GEMINI_API_KEY`, `GEMINI_MODEL`.
 
 ## Layout
 
@@ -124,7 +136,8 @@ server/store.py      file storage
 server/calcvault.py  CalcVault client
 server/webassign.py  AssignPad (WebAssign) client
 server/inkvault.py   InkVault notes client (read-only)
-server/ask.py        in-app Ask Claude via the Claude Code CLI
+server/ask.py        in-app Ask Claude via the Claude Code CLI; auto switch to Gemini
+server/gemini.py     Gemini backup (API key) with the same tools
 public/              web app (board.js = drawing board, ink.js = InkVault engine)
 mcp_stdio.py         stdio bridge for Claude Desktop
 ```

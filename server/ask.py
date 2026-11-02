@@ -17,13 +17,16 @@ Without a logged-in CLI the question is saved in the workspace and the app hands
 you a one-line prompt to paste into Claude Desktop / claude.ai (with the
 ProblemVault connector added), which answers it with the same tools.
 """
+import datetime
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
+import time
 
-from . import events, store
+from . import events, gemini, store
 
 CLI = os.environ.get("CLAUDE_CLI") or shutil.which("claude")
 _running = set()
@@ -110,7 +113,7 @@ def explain(err):
     return err
 
 
-def available():
+def claude_ready():
     return bool(CLI) and logged_in() and os.environ.get("CLAUDE_CLI_DISABLED") not in ("1", "true")
 
 
@@ -120,8 +123,92 @@ def status():
         "loggedIn": bool(CLI) and logged_in(),
         "tokenSaved": bool(saved_token()),
         "envToken": bool(env_token()),
-        "ready": available(),
+        "ready": claude_ready(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Which AI answers: auto (Claude, Gemini while Claude's limit is used up), or one of them
+# ---------------------------------------------------------------------------
+
+MODES = ("auto", "claude", "gemini")
+_LIMIT = re.compile(r"(usage|rate|session|weekly|5-hour|daily)[ _-]limit|limit (reached|exceeded)|hit your limit|out of (extra )?usage", re.I)
+_RESET = re.compile(r"resets?(?: at)?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?(?:\s*\(([^)]+)\))?", re.I)
+
+
+def mode():
+    m = store.get_settings().get("ai_mode")
+    return m if m in MODES else "auto"
+
+
+def set_mode(m):
+    if m in MODES:
+        store.update_settings({"ai_mode": m})
+
+
+def limited_until():
+    """ms timestamp until which Claude's limit is used up, or 0."""
+    t = store.get_settings().get("claude_limited_until") or 0
+    return t if t > time.time() * 1000 else 0
+
+
+def is_limit(err):
+    return bool(_LIMIT.search(err or ""))
+
+
+def reset_time(err, now=None):
+    """When Claude Code says the limit resets (ms). Unknown: in 1 hour, then Claude is tried again."""
+    now = now or time.time()
+    m = re.search(r"\|(\d{10})\b", err)  # "Claude AI usage limit reached|1767225600"
+    if m:
+        return int(m.group(1)) * 1000
+    m = _RESET.search(err)
+    if m:
+        h, mi, ap, tzname = int(m.group(1)), int(m.group(2) or 0), (m.group(3) or "").lower(), m.group(4)
+        if ap == "pm" and h < 12:
+            h += 12
+        if ap == "am" and h == 12:
+            h = 0
+        tz = None
+        if tzname:
+            try:
+                from zoneinfo import ZoneInfo
+                tz = ZoneInfo(tzname.strip())
+            except Exception:
+                tz = None
+        cur = datetime.datetime.fromtimestamp(now, tz) if tz else datetime.datetime.fromtimestamp(now)
+        if h < 24 and mi < 60:
+            at = cur.replace(hour=h, minute=mi, second=0, microsecond=0)
+            if at <= cur:
+                at += datetime.timedelta(days=1)
+            return int(at.timestamp() * 1000)
+    return int((now + 3600) * 1000)
+
+
+def mark_limited(err):
+    store.update_settings({"claude_limited_until": reset_time(err)})
+    events.publish("index", {"type": "settings"})
+
+
+def provider():
+    """'claude', 'gemini' or None (nothing set up: the app gives a prompt to paste)."""
+    m, c, g = mode(), claude_ready(), gemini.available()
+    if m == "claude":
+        return "claude" if c else None
+    if m == "gemini":
+        return "gemini" if g else None
+    if c and not limited_until():
+        return "claude"
+    return "gemini" if g else ("claude" if c else None)
+
+
+def available():
+    return provider() is not None
+
+
+def ai_status():
+    return {"mode": mode(), "provider": provider(), "limitedUntil": limited_until(),
+            "claude": claude_ready(), "gemini": gemini.status()}
 
 
 def test():
@@ -130,7 +217,7 @@ def test():
         return False, "Claude Code is not installed on the server."
     try:
         p = subprocess.run([CLI, "-p", "--output-format", "text", "--strict-mcp-config", "--max-turns", "1"],
-                           input="Reply with exactly: OK", capture_output=True, text=True, encoding="utf-8",
+                           input="Reply with exactly: OK", capture_output=True, text=True, encoding="utf-8", errors="replace",
                            timeout=90, cwd=store.DATA_DIR, env=_env())
     except (OSError, subprocess.TimeoutExpired) as e:
         return False, str(e)
@@ -150,8 +237,8 @@ def manual_prompt(w, q):
 
 
 def run(w, q, port, token):
-    """Background: run claude -p and post its answer as a note."""
-    from .mcp import post_note
+    """Background: run claude -p (or Gemini) and post its answer as a note."""
+    from .mcp import INSTRUCTIONS, post_note
     wid = w["id"]
     with _lock:
         if wid in _running:
@@ -164,22 +251,37 @@ def run(w, q, port, token):
                                                 "headers": {"Authorization": f"Bearer {token}"}}}}
         with open(cfg_path, "w", encoding="utf-8") as f:
             json.dump(cfg, f)
-        events.publish(wid, {"type": "ask", "state": "running", "question": q["id"]})
+        prompt = f"Workspace {wid}, question {q['id']}: {PRESETS[q['preset']][1] if q.get('preset') in PRESETS else q['text']}"
+        who = provider()
         try:
-            p = subprocess.run(
-                [CLI, "-p", "--output-format", "text", "--mcp-config", cfg_path, "--strict-mcp-config",
-                 "--allowedTools", "mcp__problemvault", "--disallowedTools", "mcp__problemvault__post_note",
-                 "--append-system-prompt", SYSTEM.format(wid=wid)],
-                input=f"Workspace {wid}, question {q['id']}: {PRESETS[q['preset']][1] if q.get('preset') in PRESETS else q['text']}",
-                capture_output=True, text=True, encoding="utf-8", timeout=600, cwd=store.DATA_DIR, env=_env(),
-            )
-            answer = (p.stdout or "").strip()
-            if p.returncode != 0 or not answer or _login_error(answer):
-                raise RuntimeError(explain((p.stderr or p.stdout or f"exit {p.returncode}").strip()[-600:]))
-            post_note(wid, answer, q["id"])
-            events.publish(wid, {"type": "ask", "state": "done", "question": q["id"]})
+            answer = None
+            if who == "claude":
+                events.publish(wid, {"type": "ask", "state": "running", "question": q["id"], "by": "claude"})
+                p = subprocess.run(
+                    [CLI, "-p", "--output-format", "text", "--mcp-config", cfg_path, "--strict-mcp-config",
+                     "--allowedTools", "mcp__problemvault", "--disallowedTools", "mcp__problemvault__post_note",
+                     "--append-system-prompt", SYSTEM.format(wid=wid)],
+                    input=prompt, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600,
+                    cwd=store.DATA_DIR, env=_env(),
+                )
+                answer = (p.stdout or "").strip()
+                if p.returncode != 0 or not answer or _login_error(answer) or (len(answer) < 300 and is_limit(answer)):
+                    err = (p.stderr or p.stdout or f"exit {p.returncode}").strip()[-600:]
+                    if not is_limit(err):
+                        raise RuntimeError(explain(err))
+                    mark_limited(err)
+                    if mode() != "auto" or not gemini.available():
+                        raise RuntimeError(f"Claude's usage limit is used up. {err[-200:]}")
+                    answer, who = None, "gemini"  # auto: Gemini answers this one
+            if who == "gemini":
+                events.publish(wid, {"type": "ask", "state": "running", "question": q["id"], "by": "gemini"})
+                answer = gemini.run(SYSTEM.format(wid=wid) + "\n\n" + INSTRUCTIONS, prompt)
+            if answer is None:
+                raise RuntimeError("No AI is set up.")
+            post_note(wid, answer, q["id"], by=who)
+            events.publish(wid, {"type": "ask", "state": "done", "question": q["id"], "by": who})
         except Exception as e:  # report it in the app instead of failing silently
-            events.publish(wid, {"type": "ask", "state": "error", "question": q["id"], "error": str(e)})
+            events.publish(wid, {"type": "ask", "state": "error", "question": q["id"], "error": str(e), "by": who})
         finally:
             with _lock:
                 _running.discard(wid)

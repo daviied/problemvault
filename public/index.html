@@ -128,6 +128,13 @@
                 <span id="ask-state" class="muted"></span>
               </div>
               <label id="ink-toggle" class="ink-toggle" hidden title="Claude can search and read your InkVault class notes"><input type="checkbox" id="ink-on"> Let Claude read my InkVault notes</label>
+              <div id="ai-pick" class="ai-pick" hidden title="Auto: Claude, and Gemini while your Claude limit is used up">
+                <span>AI:</span>
+                <label><input type="radio" name="ai-mode" value="auto"> Auto</label>
+                <label><input type="radio" name="ai-mode" value="claude"> Claude</label>
+                <label><input type="radio" name="ai-mode" value="gemini"> Gemini</label>
+                <span id="ai-note" class="muted small"></span>
+              </div>
             </form>
             <div id="manual" hidden>
               <p>Paste this into Claude (Desktop, claude.ai or Claude Code) with the ProblemVault connector on:</p>
@@ -229,6 +236,18 @@
     <button type="button" id="cli-test" class="subtle">Test</button>
     <button type="button" id="cli-forget" class="subtle" hidden>Remove token</button>
     <span id="cli-msg" class="muted small"></span>
+  </div>
+  <h3>Gemini backup (when your Claude limit is used up)</h3>
+  <p>Status: <strong id="gem-state"></strong></p>
+  <p class="small">Make a key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>, paste it here, Save, then Test. In the Claude tab, <strong>AI: Auto</strong> uses Gemini only while Claude is at its limit.</p>
+  <div class="token-row">
+    <input type="password" id="gem-key" placeholder="AIza…" autocomplete="off">
+    <button type="button" id="gem-save" class="primary">Save</button>
+  </div>
+  <div class="token-row">
+    <button type="button" id="gem-test" class="subtle">Test</button>
+    <button type="button" id="gem-forget" class="subtle" hidden>Remove key</button>
+    <span id="gem-msg" class="muted small"></span>
   </div>
   <form method="dialog"><button class="primary">Close</button></form>
 </dialog>

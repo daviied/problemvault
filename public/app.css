@@ -327,4 +327,8 @@ html[data-mode="desktop"] #menu label:has(#opt-precise),
 html[data-mode="desktop"] #menu label:has(#opt-finger) { display: none; }
 
 .ink-toggle { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; color: var(--muted); cursor: pointer; }
+.ai-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 8px; font-size: 13px; color: var(--muted); }
+.ai-pick label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.ai-pick input { margin: 0; accent-color: var(--accent); }
+.ai-pick #ai-note { flex-basis: 100%; }
 .ink-toggle input { width: 16px; height: 16px; accent-color: var(--accent); margin: 0; }

@@ -98,6 +98,7 @@ $('#login form').onsubmit = async e => {
 async function loadState() {
   state = await call('GET', '/api/state');
   renderInkToggle();
+  renderAi();
   renderTree();
   renderFolderSelect();
 }
@@ -113,6 +114,22 @@ $('#ink-on').addEventListener('change', async e => {
   catch (err) { toast(err.message); }
   renderInkToggle();
 });
+
+// Which AI answers in the app: Auto (Claude; Gemini while Claude is at its limit), Claude or Gemini
+const aiName = by => (by === 'gemini' ? 'Gemini' : 'Claude');
+function renderAi() {
+  const ai = state.ai || {};
+  $('#ai-pick').hidden = !(ai.gemini && ai.gemini.ready);
+  document.querySelectorAll('input[name="ai-mode"]').forEach(r => { r.checked = r.value === ai.mode; });
+  const until = ai.limitedUntil ? new Date(ai.limitedUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+  $('#ai-note').textContent = !ai.provider ? `${aiName(ai.mode)} is not set up`
+    : until ? `Claude limit reached, resets about ${until}. ${ai.mode === 'auto' ? 'Gemini answers until then.' : ''}`
+      : `${aiName(ai.provider)} answers`;
+}
+document.querySelectorAll('input[name="ai-mode"]').forEach(r => r.addEventListener('change', async () => {
+  try { state.ai = await call('PUT', '/api/ai', { mode: r.value }); } catch (err) { toast(err.message); }
+  renderAi();
+}));
 
 // Server-sent events, reconnecting on their own
 function listen(key, onMsg) {
@@ -225,11 +242,12 @@ async function onWsEvent(m) {
   else if (m.type === 'wa-submitted') { if (currentTab() === 'wa') webassign.render(); }
   else if (m.type === 'ask') {
     const el = $('#ask-state');
-    if (m.state === 'running') el.textContent = 'Claude is working on it…';
+    const who = aiName(m.by);
+    if (m.state === 'running') el.textContent = `${who} is working on it…`;
     else if (m.state === 'done') el.textContent = '';
-    else if (m.state === 'error') { el.textContent = `Claude failed: ${m.error}`; toast('Claude failed (see the Claude tab)', 3000); }
+    else if (m.state === 'error') { el.textContent = `${who} failed: ${m.error}`; toast(`${who} failed (see the Claude tab)`, 3000); }
     setQuickBusy(m.state === 'running');
-    if (m.state === 'done' && MODE === 'tablet') toast('Claude is done: see the marks on your page', 2500);
+    if (m.state === 'done' && MODE === 'tablet') toast(`${who} is done: see the marks on your page`, 2500);
   }
 }
 
@@ -468,7 +486,7 @@ function renderClaude() {
     const el = document.createElement('div');
     el.className = 'note';
     const q = n.reply_to && qById.get(n.reply_to);
-    el.innerHTML = `<div class="note-head"><span>Claude · ${when(n.at)}</span><button title="Delete note">×</button></div>
+    el.innerHTML = `<div class="note-head"><span>${aiName(n.by)} · ${when(n.at)}</span><button title="Delete note">×</button></div>
       ${q ? '<div class="muted small re"></div>' : ''}<div class="md"></div>`;
     if (q) el.querySelector('.re').textContent = `Re: ${q.text}`;
     el.querySelector('.md').innerHTML = markdown(n.md);
@@ -504,7 +522,7 @@ $('#ask').onsubmit = async e => {
     $('#ask-text').value = '';
     if (r.mode === 'cli') {
       $('#manual').hidden = true;
-      $('#ask-state').textContent = 'Claude is working on it…';
+      $('#ask-state').textContent = `${aiName(r.by)} is working on it…`;
     } else {
       $('#manual').hidden = false;
       $('#manual-prompt').textContent = r.prompt;
@@ -526,7 +544,7 @@ document.querySelectorAll('#quick button').forEach(b => b.addEventListener('clic
     const r = await call('POST', `/api/ws/${ws.meta.id}/ask`, { preset: b.dataset.preset });
     if (r.mode === 'cli') {
       setQuickBusy(true);
-      $('#ask-state').textContent = 'Claude is working on it…';
+      $('#ask-state').textContent = `${aiName(r.by)} is working on it…`;
       toast({ check: 'Claude is checking your work…', next: 'Claude is looking at your work…', submit: 'Claude is checking before it submits…' }[b.dataset.preset], 2500);
     } else {
       copy(r.prompt);
@@ -634,12 +652,14 @@ $('#connect-btn').onclick = () => {
   }, null, 2);
   $('#web-url').textContent = `https://<your-public-host>/mcp/${token}`;
   showCli(state.claude);
+  showGem(state.ai);
   $('#cli-msg').textContent = '';
+  $('#gem-msg').textContent = '';
   $('#connect').showModal();
 };
 
 function showCli(s) {
-  state.claude = { ...state.claude, ...s, cli: s.ready };
+  state.claude = { ...state.claude, ...s, cli: s.ready || !!(state.ai && state.ai.provider) };
   $('#cli-state').textContent = !s.installed ? 'Claude Code is not installed on this server (the Docker image has it)'
     : s.ready ? 'ready: Ask Claude runs here on your subscription'
       : 'installed, not logged in';
@@ -659,6 +679,31 @@ $('#cli-test').onclick = async () => {
   const r = await call('POST', '/api/claude/test').catch(err => ({ ok: false, message: err.message }));
   if (r.installed !== undefined) showCli(r);
   $('#cli-msg').textContent = (r.ok ? '✓ ' : '✗ ') + r.message;
+};
+function showGem(ai) {
+  state.ai = ai;
+  const g = ai.gemini || {};
+  $('#gem-state').textContent = g.ready ? `key set (${g.envKey && !g.keySaved ? 'from GEMINI_API_KEY' : 'saved'}), model ${g.model}` : 'no key';
+  $('#gem-forget').hidden = !g.keySaved;
+  $('#gem-test').hidden = !g.ready;
+  renderAi();
+}
+$('#gem-save').onclick = async () => {
+  const key = $('#gem-key').value.trim();
+  if (!key) return;
+  showGem(await call('POST', '/api/gemini/key', { key }));
+  $('#gem-key').value = '';
+  $('#gem-msg').textContent = 'Saved. Click Test.';
+};
+$('#gem-test').onclick = async () => {
+  $('#gem-msg').textContent = 'Asking Gemini…';
+  const r = await call('POST', '/api/gemini/test').catch(err => ({ ok: false, message: err.message }));
+  if (r.gemini) showGem(r);
+  $('#gem-msg').textContent = (r.ok ? '✓ ' : '✗ ') + r.message;
+};
+$('#gem-forget').onclick = async () => {
+  showGem(await call('POST', '/api/gemini/key', { key: '' }));
+  $('#gem-msg').textContent = 'Key removed.';
 };
 $('#cli-forget').onclick = async () => {
   showCli(await call('POST', '/api/claude/token', { token: '' }));

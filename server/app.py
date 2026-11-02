@@ -22,7 +22,7 @@ import urllib.parse
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import ask, calcvault, events, inkvault, mcp, store, webassign
+from . import ask, calcvault, events, gemini, inkvault, mcp, store, webassign
 
 PORT = int(os.environ.get("PORT", "8787"))
 HOST = os.environ.get("HOST", "0.0.0.0")
@@ -269,6 +269,19 @@ class Handler(BaseHTTPRequestHandler):
                 inkvault.set_on(self.json_body().get("enabled"))
                 events.publish("index", {"type": "settings"})
             return self.send(200, self.inkvault_state())
+        if head == "ai" and parts[1:] == [] and method in ("GET", "PUT"):  # auto / claude / gemini
+            if method == "PUT":
+                ask.set_mode(self.json_body().get("mode"))
+                events.publish("index", {"type": "settings"})
+            return self.send(200, ask.ai_status())
+        if head == "gemini":  # Gemini backup: API key, test
+            if parts[1:] == ["key"] and method == "POST":
+                gemini.set_key(str(self.json_body().get("key", ""))[:500])
+                events.publish("index", {"type": "settings"})
+                return self.send(200, ask.ai_status())
+            if parts[1:] == ["test"] and method == "POST":
+                ok, msg = gemini.test()
+                return self.send(200, {"ok": ok, "message": msg, **ask.ai_status()})
         if head == "claude":  # Claude Code CLI on this server: status, token, test
             if parts[1:] == [] and method == "GET":
                 return self.send(200, ask.status())
@@ -337,7 +350,8 @@ class Handler(BaseHTTPRequestHandler):
             "calcvault": {"enabled": calcvault.enabled(), "url": calcvault.PUBLIC_URL},
             "webassign": {"enabled": webassign.enabled()},
             "inkvault": self.inkvault_state(),
-            "claude": {"cli": ask.available(), **ask.status()},
+            "claude": {**ask.status(), "cli": ask.available()},
+            "ai": ask.ai_status(),
             "mcp": {"url": f"{self.public_origin()}/mcp", "token": MCP_TOKEN},
         }
 
@@ -422,7 +436,7 @@ class Handler(BaseHTTPRequestHandler):
             events.publish(wid, {"type": "claude"})
             if ask.available():
                 ask.run(w, q, PORT, MCP_TOKEN)
-                return self.send(200, {"mode": "cli", "question": q})
+                return self.send(200, {"mode": "cli", "by": ask.provider(), "question": q})
             return self.send(200, {"mode": "manual", "question": q, "prompt": ask.manual_prompt(w, q)})
         if sub == "notes" and len(rest) == 2 and method == "DELETE":
             store.update_claude(wid, lambda c: c.__setitem__("notes", [n for n in c["notes"] if n["id"] != rest[1]]))
