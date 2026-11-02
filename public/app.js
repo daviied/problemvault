@@ -222,11 +222,14 @@ async function onWsEvent(m) {
     renderCalc();
     if (relink) webassign.render();
   } else if (m.type === 'calc') renderCalc();
+  else if (m.type === 'wa-submitted') { if (currentTab() === 'wa') webassign.render(); }
   else if (m.type === 'ask') {
     const el = $('#ask-state');
     if (m.state === 'running') el.textContent = 'Claude is working on it…';
     else if (m.state === 'done') el.textContent = '';
     else if (m.state === 'error') { el.textContent = `Claude failed: ${m.error}`; toast('Claude failed (see the Claude tab)', 3000); }
+    setQuickBusy(m.state === 'running');
+    if (m.state === 'done' && MODE === 'tablet') toast('Claude is done: see the marks on your page', 2500);
   }
 }
 
@@ -415,6 +418,7 @@ function renderMeta() {
   if (document.activeElement !== $('#ws-title')) $('#ws-title').value = m.title;
   if (document.activeElement !== $('#ws-problem')) $('#ws-problem').value = m.problem || '';
   $('#ws-status').value = m.status;
+  $('#quick [data-preset=submit]').hidden = !m.wa; // only for a WebAssign problem
   $('#ws-folder').value = m.folder || '';
 }
 
@@ -510,6 +514,28 @@ $('#ask').onsubmit = async e => {
     toast(err.message);
   }
 };
+// Tablet: "Check with Claude" and "Next step" send a ready-made request (text is on the server)
+function setQuickBusy(busy) {
+  document.querySelectorAll('#quick button').forEach(b => { b.disabled = busy; });
+}
+document.querySelectorAll('#quick button').forEach(b => b.addEventListener('click', async () => {
+  if (!ws) return toast('Open a problem first');
+  if (b.dataset.preset === 'submit'
+    && !confirm('Claude checks your work. If it is right and your answers are circled, Claude types them into WebAssign and submits. Continue?')) return;
+  try {
+    const r = await call('POST', `/api/ws/${ws.meta.id}/ask`, { preset: b.dataset.preset });
+    if (r.mode === 'cli') {
+      setQuickBusy(true);
+      $('#ask-state').textContent = 'Claude is working on it…';
+      toast({ check: 'Claude is checking your work…', next: 'Claude is looking at your work…', submit: 'Claude is checking before it submits…' }[b.dataset.preset], 2500);
+    } else {
+      copy(r.prompt);
+      toast('Copied: paste it into Claude (ProblemVault connector on)', 3500);
+    }
+  } catch (err) {
+    toast(err.message);
+  }
+}));
 $('#ask-text').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) $('#ask').requestSubmit(); });
 $('#manual-copy').onclick = () => copy($('#manual-prompt').textContent);
 

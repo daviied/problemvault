@@ -9,8 +9,11 @@ import base64
 import datetime
 import json
 import math
+import threading
+import time
 
 from . import calcvault, events, inkvault, render, store, webassign
+from .latex2mml import latex_to_mathml
 
 PROTOCOL = "2025-06-18"
 INSTRUCTIONS = """ProblemVault holds a student's homework: one workspace per problem, each a page of
@@ -53,7 +56,7 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"workspace": WS, "image": S, "text": S}, "required": ["workspace", "image", "text"]}},
     {"name": "post_note", "description": "Show a note to the student beside their work (Markdown with $inline$ / $$block$$ LaTeX). Use answers=<question id> when replying to a question they asked.",
      "inputSchema": {"type": "object", "properties": {"workspace": WS, "markdown": S, "answers": S}, "required": ["workspace", "markdown"]}},
-    {"name": "write", "description": "Type on the student's page, live, in Claude's colour: a hint, a corrected step, a label. Markdown with $LaTeX$. Place it with near_block (put beside/under that block of their writing) or x/y in page units (page is 1000 wide; view_ink captions give box coords: page_x = box_x0 + pixel_x / scale). With neither, it goes below everything. Returns the mark id.",
+    {"name": "write", "description": "Type on the student's page, live, in Claude's colour: a hint, a corrected step, a label. Markdown with $LaTeX$. It never covers the student's writing (moved to the nearest free spot if needed). Place it with near_block (put beside/under that block of their writing) or x/y in page units (page is 1000 wide; view_ink captions give box coords: page_x = box_x0 + pixel_x / scale). With neither, it goes below everything. Returns the mark id.",
      "inputSchema": {"type": "object", "properties": {
          "workspace": WS, "text": S, "near_block": S,
          "x": {"type": "number"}, "y": {"type": "number"},
@@ -76,6 +79,25 @@ TOOLS = [
     {"name": "calcvault_add_lines", "description": "Append lines to the workspace's CalcVault calculator (creates and links one if none). Lines: {latex} for an equation such as 'R_1=4' or 'I=\\\\frac{V}{R_1}'; {role:'input', var, label, value}; {role:'output', label, latex}. The student's CalcVault computes the values.",
      "inputSchema": {"type": "object", "properties": {"workspace": WS, "lines": {"type": "array", "items": {"type": "object"}}}, "required": ["workspace", "lines"]}},
 ]
+
+_SUBMIT_TOOL = {"name": "webassign_submit", "description": "Type the student's circled final answers into the linked WebAssign question and submit it. ONLY when the student pressed Submit in ProblemVault (otherwise it is refused), and only after you checked that their work is right and each answer is circled. Answers exactly as the student wrote them (same digits, rounding and sign; no units). Math boxes take LaTeX, e.g. {\"RA_1_1\": \"7.2\"}. Box names come from webassign_read. Returns which answers WebAssign marked correct.",
+                "inputSchema": {"type": "object", "properties": {"workspace": WS, "answers": {"type": "object", "description": "box name -> answer (LaTeX for math boxes)"}}, "required": ["workspace", "answers"]}}
+TOOLS.append(_SUBMIT_TOOL)
+
+# The student's Submit button allows ONE submission of that workspace's question, for 15 minutes.
+_permits = {}
+_permit_lock = threading.Lock()
+
+
+def allow_submit(wid, minutes=15):
+    with _permit_lock:
+        _permits[wid] = time.time() + minutes * 60
+
+
+def _take_permit(wid):
+    with _permit_lock:
+        ok = _permits.pop(wid, 0) > time.time()
+    return ok
 
 # listed only while InkVault is connected and switched on
 INKVAULT_TOOLS = [
@@ -198,7 +220,8 @@ def t_get_workspace(args):
     open_q = [q for q in c["questions"] if not q.get("answered")]
     if open_q:
         out.append("\nOpen questions from the student (answer with post_note answers=<id>):")
-        out += [f"- {q['id']}: {q['text']}" for q in open_q]
+        from .ask import PRESETS  # a one-tap request carries its full instructions
+        out += [f"- {q['id']}: {PRESETS[q['preset']][1] if q.get('preset') in PRESETS else q['text']}" for q in open_q]
     if c["notes"]:
         out.append(f"\nYour last note ({_ago(c['notes'][-1]['at'])}):\n{c['notes'][-1]['md'][:600]}")
     return "\n".join(out)
@@ -368,6 +391,30 @@ def _grow(page, bottom, change):
     return change
 
 
+def _occupied(page):
+    """Boxes Claude's typed notes must not cover: the student's ink, images and other typed text."""
+    boxes = [b["box"] for b in render.blocks(page)]
+    boxes += [[i["x"], i["y"], i["x"] + i["w"], i["y"] + i["h"]] for i in page["images"]]
+    boxes += [[t["x"], t["y"], t["x"] + t["w"], t["y"] + _text_height(t)] for t in page.get("texts", [])]
+    return boxes
+
+
+def _free_spot(page, x, y, w, h):
+    """(x, y, w) nearest below the wanted spot where a w x h note covers nothing.
+    Tries the spot, then narrower to fit beside the content, then each gap lower down."""
+    taken = _occupied(page)
+    clear = lambda x0, y0, ww: not any(render._overlaps([x0, y0 - 4, x0 + ww, y0 + h + 4], o) for o in taken)
+    for yy in sorted({y} | {o[3] + 10 for o in taken if o[3] + 10 > y}):
+        if clear(x, yy, w):
+            return x, yy, w
+        # beside whatever is in the way on this row, if there's a usable strip
+        row = [o for o in taken if o[1] < yy + h + 4 and o[3] > yy - 4]
+        right = max([o[2] for o in row if o[0] < x + w] + [x]) + 20
+        if page["width"] - right - 20 >= 220 and clear(right, yy, page["width"] - right - 20):
+            return right, yy, page["width"] - right - 20
+    return x, max(y, _content_bottom(page) + 30), w
+
+
 def t_write(args):
     w = _ws(args)
     wid = w["id"]
@@ -397,8 +444,10 @@ def t_write(args):
     width = float(width or max(200, page["width"] - float(x) - 20))
     t = {"id": "c" + store.new_id(), "z": store.now_ms() * 1000, "x": float(x), "y": float(y), "w": width,
          "md": text, "color": _color(args.get("color")), "size": size, "by": "claude"}
+    # never cover the student's writing: slide to the nearest free spot
+    t["x"], t["y"], t["w"] = _free_spot(page, t["x"], t["y"], t["w"], _text_height(t))
     _apply(wid, _grow(page, t["y"] + _text_height(t), {"textAdd": [t]}))
-    return f"Wrote mark {t['id']} at x{round(t['x'])} y{round(t['y'])} (width {round(width)}). The student sees it now."
+    return f"Wrote mark {t['id']} at x{round(t['x'])} y{round(t['y'])} (width {round(t['w'])}). The student sees it now."
 
 
 def _dense(pts, step=2.0):
@@ -538,6 +587,37 @@ def t_webassign_read(args):
             content.append({"type": "text", "text": f"Figure {i}:"})
             content.append({"type": "image", "data": base64.b64encode(data).decode(), "mimeType": mime})
     return content
+
+
+def t_webassign_submit(args):
+    w = _ws(args)
+    if not w.get("wa"):
+        raise ToolError("No WebAssign question is linked to this workspace.")
+    given = args.get("answers") if isinstance(args.get("answers"), dict) else {}
+    if not given:
+        raise ToolError("answers is empty")
+    try:
+        a, q = webassign.question(w["wa"]["dep"], w["wa"]["box"], refresh=True)
+    except webassign.WebAssignError as e:
+        raise ToolError(str(e)) from None
+    parts = {p["name"]: p for p in q.get("parts", [])}
+    bad = [n for n in given if n not in parts or parts[n]["kind"] not in ("math", "text") or not parts[n].get("enabled", True)]
+    if bad:
+        raise ToolError(f"Can't fill {', '.join(bad)}: only open math/text boxes of this question ({', '.join(parts)}). "
+                        "Tell the student to answer choice boxes themselves.")
+    if not _take_permit(w["id"]):
+        raise ToolError("Not allowed: the student did not press Submit in ProblemVault (or it expired). Tell them their answers instead.")
+    answers = {n: p["value"] for n, p in parts.items() if p.get("enabled", True) and p.get("value") is not None}
+    for n, v in given.items():
+        answers[n] = latex_to_mathml(str(v)) if parts[n]["kind"] == "math" else str(v)
+    try:
+        a = webassign.submit(w["wa"]["dep"], w["wa"]["box"], answers, "submit")
+    except webassign.WebAssignError as e:
+        raise ToolError(f"Submit failed: {e}") from None
+    events.publish(w["id"], {"type": "wa-submitted"})
+    nq = next((x for x in a.get("questions", []) if x.get("box") == w["wa"]["box"]), None)
+    marks = ", ".join(f"{p['name']}: {p.get('mark') or 'no mark'}" for p in (nq or {}).get("parts", []))
+    return f"Submitted to WebAssign. {marks or 'No marks returned.'}"
 
 
 def t_calcvault_read(args):

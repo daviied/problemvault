@@ -38,6 +38,32 @@ SYSTEM = (
 )
 
 
+# one-tap requests from the tablet: label shown in the app, prompt sent to Claude
+PRESETS = {
+    "check": ("Check my work",
+              "Check ALL of my work on this page, step by step (read any ink you have not read yet; use "
+              "calcvault_read / webassign_read if linked). For each mistake, put a correction ON THE PAGE: draw "
+              "to point at it (circle, underline or cross) and write a short correction beside that block with "
+              "near_block. Mark correct steps with a small check. Never place text over my writing. Do not solve "
+              "the parts I have not done yet. Reply with a 1-3 line summary."),
+    "next": ("Next step",
+             "Look at what I have done so far on this page and check it first (read any ink you have not read "
+             "yet; use calcvault_read / webassign_read if linked). If there is a mistake: mark it on the page "
+             "(draw at it, write near_block) and help me fix it with a hint or the corrected step, and do NOT "
+             "give the next step yet. If everything so far is right: write ONLY the next step (one step, not "
+             "the whole solution) on the page below my last line, as a hint I can follow. Never place text over "
+             "my writing. Reply with a 1-2 line summary."),
+    "submit": ("Check and submit to WebAssign",
+               "I pressed Submit. Call webassign_read (figures=false if you already saw them) and check ALL my work "
+               "on this page. Submit ONLY if every step is right AND each answer box has a final answer I CIRCLED on "
+               "the page. Then call webassign_submit with each answer EXACTLY as I wrote it (same digits, rounding "
+               "and sign; no units); do not fix or round it for me. If anything is wrong, an answer is not circled, "
+               "or a box needs a choice (radio/select): do NOT submit; mark the problem on the page (draw at it, "
+               "write near_block) and tell me what to fix. Never place text over my writing. Reply with a 1-2 line "
+               "summary that says whether you submitted and what WebAssign marked."),
+}
+
+
 def _clean(token):
     # a token copied from a terminal is often wrapped onto several lines
     return "".join((token or "").split())
@@ -144,7 +170,7 @@ def run(w, q, port, token):
                 [CLI, "-p", "--output-format", "text", "--mcp-config", cfg_path, "--strict-mcp-config",
                  "--allowedTools", "mcp__problemvault", "--disallowedTools", "mcp__problemvault__post_note",
                  "--append-system-prompt", SYSTEM.format(wid=wid)],
-                input=f"Workspace {wid}, question {q['id']}: {q['text']}",
+                input=f"Workspace {wid}, question {q['id']}: {PRESETS[q['preset']][1] if q.get('preset') in PRESETS else q['text']}",
                 capture_output=True, text=True, encoding="utf-8", timeout=600, cwd=store.DATA_DIR, env=_env(),
             )
             answer = (p.stdout or "").strip()

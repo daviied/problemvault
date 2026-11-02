@@ -274,6 +274,11 @@ html[data-mode="tablet"] #empty { padding-top: 70px; }
 /* the two menu buttons first, so they never scroll off a narrow toolbar */
 html[data-mode="tablet"] #side-toggle { order: -3; }
 html[data-mode="tablet"] #panel-toggle { order: -2; }
+/* one-tap Claude requests: tablet only */
+.quick { display: none; gap: 6px; flex-shrink: 0; }
+html[data-mode="tablet"] .quick { display: flex; order: -1; }
+.quick button:disabled { opacity: .55; }
+#toolbar .quick button.submit { background: #2f9e44; color: #fff; }
 #empty-menu { display: none; margin-left: 8px; }
 html[data-mode="tablet"] #empty-menu, html[data-mode="phone"] #empty-menu { display: inline-block; }
 @media (max-width: 800px) { #empty-menu { display: inline-block; } }

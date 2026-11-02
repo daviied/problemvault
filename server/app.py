@@ -406,10 +406,18 @@ class Handler(BaseHTTPRequestHandler):
         if sub == "preview" and method == "GET":
             return self.preview(w, qs)
         if sub == "ask" and method == "POST":
-            text = str(self.json_body().get("text", "")).strip()[:4000]
+            b = self.json_body()
+            preset = b.get("preset") if b.get("preset") in ask.PRESETS else None
+            text = ask.PRESETS[preset][0] if preset else str(b.get("text", "")).strip()[:4000]
             if not text:
                 raise HttpError(400, "Empty question")
             q = {"id": "q" + store.new_id()[:6], "at": store.now_ms(), "text": text}
+            if preset == "submit":
+                if not w.get("wa"):
+                    raise HttpError(400, "No WebAssign question is linked to this problem")
+                mcp.allow_submit(wid)  # the one place a submission is allowed from
+            if preset:
+                q["preset"] = preset
             store.update_claude(wid, lambda c: c["questions"].append(q))
             events.publish(wid, {"type": "claude"})
             if ask.available():

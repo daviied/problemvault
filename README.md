@@ -31,7 +31,8 @@ Needs your AssignPad server (the `Web-Assign` project) running. ProblemVault cal
 2. Panel → **WebAssign**:
    - No question linked: pick an assignment, then **Link here** on a question, or **Import all as problems** (a folder named after the assignment, one problem per question, problem text filled in).
    - Linked: the question with answer boxes. **Save** / **Submit** go to WebAssign; ✓ / ✗ show WebAssign's marks. **Refresh** reads it again. **Use as problem text** copies the question (cheap for Claude). **Add figures to page** puts its images on the page to write on.
-3. Claude: `webassign_read` gives the question and which answers WebAssign marked wrong. Claude cannot submit; you do.
+3. Claude: `webassign_read` gives the question and which answers WebAssign marked wrong.
+4. Tablet → **Submit** (only on a WebAssign problem): Claude checks your work. If it is right and each final answer is circled, Claude types your answers exactly as written into the math/text boxes and submits. Otherwise it marks what to fix and does not submit. Claude can submit only after you press Submit: one submission, within 15 minutes. Choice boxes (radio, select) you answer yourself.
 
 ## InkVault notes
 

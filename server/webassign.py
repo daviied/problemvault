@@ -156,5 +156,5 @@ def summarize(a, q):
         for i, p in enumerate(q["parts"], 1):
             state = p.get("mark") or ("answered" if p.get("value") else "empty")
             lock = ", locked" if not p.get("enabled", True) else ""
-            lines.append(f"{i}. {p.get('kind')} ({state}{lock})")
+            lines.append(f"{i}. {p.get('name')}: {p.get('kind')} ({state}{lock})")
     return "\n".join(lines)
