@@ -203,7 +203,20 @@ html[data-mode="desktop"] #stage.over-img #live { cursor: move !important; }
 #calc-lines { padding-left: 22px; margin: 0; }
 #calc-lines li { padding: 6px 0; border-bottom: 1px solid #ffffff0a; }
 #calc-lines .lbl { color: var(--muted); font-size: 12px; margin-right: 6px; }
-#calc-unlinked button { margin-bottom: 14px; }
+.calc-update { width: 100%; margin-bottom: 10px; }
+.calc-new { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.calc-new input { flex: 1 1 160px; min-width: 0; }
+.calc-new select { flex: 0 1 150px; min-width: 0; }
+#calc-search { width: 100%; margin-bottom: 8px; }
+.calc-list { display: flex; flex-direction: column; gap: 2px; }
+.calc-list h4 { margin: 10px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
+.calc-list button { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 9px 10px;
+  border-radius: 8px; border: 1px solid transparent; background: none; color: inherit; font: inherit; cursor: pointer; }
+.calc-list button:hover, .calc-list button:focus-visible { border-color: var(--accent); background: #ffffff08; }
+.calc-list button .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.calc-list button .f { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.calc-list button.current { border-color: var(--accent); }
+.calc-list .muted { padding: 8px 2px; }
 
 dialog {
   background: var(--bar); color: var(--text); border: 1px solid var(--line); border-radius: 14px;
@@ -310,6 +323,7 @@ html[data-mode="phone"] .tab { padding-bottom: calc(14px + env(safe-area-inset-b
 .wa-badge.ok { background: var(--done); }
 .wa-badge.bad { background: #c0453a; }
 .wa-q { margin: 6px 0 12px; }
+.wa-ext { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .wa-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 #wa-items h4 { margin: 14px 0 6px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
 .wa-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; width: 100%; text-align: left;

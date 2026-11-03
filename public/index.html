@@ -83,6 +83,7 @@
         <div id="quick" class="quick">
           <button class="text" data-preset="check" title="Claude checks your work and marks corrections on the page">Check with Claude</button>
           <button class="text" data-preset="next" title="Claude checks your work, then gives the next step or helps you fix a mistake">Next step</button>
+          <button class="text" data-preset="calc" title="Claude checks your math; if it is right, Claude puts your givens and equations into the linked CalcVault calculator">Update Calc</button>
           <button class="text submit" data-preset="submit" hidden title="Claude checks your work; if it is right and your answers are circled, Claude types them into WebAssign and submits">Submit</button>
         </div>
       </header>
@@ -183,14 +184,22 @@
                 <div class="calc-head"><strong id="calc-name"></strong><span class="grow"></span>
                   <a id="calc-open" target="_blank" rel="noopener">Open ↗</a>
                   <button id="calc-refresh" class="subtle">Refresh</button>
+                  <button id="calc-change" class="subtle">Change</button>
                   <button id="calc-unlink" class="subtle">Unlink</button></div>
+                <button id="calc-update" class="primary calc-update" title="Claude checks your math; if it is right, it adds your givens and equations here">Update Calc</button>
                 <ol id="calc-lines"></ol>
-                <p class="muted small">Ask Claude to “put the givens into CalcVault” and it adds lines here; CalcVault computes the values.</p>
+                <p class="muted small"><strong>Update Calc</strong>: Claude checks your math on the page. If it is right, Claude adds your givens and equations here (not the ones already here). If not, it marks the mistake and changes nothing.</p>
               </div>
               <div id="calc-unlinked" hidden>
-                <p>Link a CalcVault calculator to this problem:</p>
-                <button id="calc-create" class="primary">Create one for this problem</button>
-                <label>or pick an existing one<select id="calc-pick"><option value="">Choose…</option></select></label>
+                <div class="calc-head"><strong id="calc-pick-title">Link a calculator</strong><span class="grow"></span>
+                  <button id="calc-cancel" class="subtle" hidden>Cancel</button></div>
+                <div class="calc-new">
+                  <input id="calc-new-name" placeholder="New calculator name" autocomplete="off">
+                  <select id="calc-new-folder" title="CalcVault folder"></select>
+                  <button id="calc-create" class="primary">Create</button>
+                </div>
+                <input id="calc-search" type="search" placeholder="Search existing calculators…" autocomplete="off">
+                <div id="calc-list" class="calc-list"></div>
               </div>
             </div>
           </div>

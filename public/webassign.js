@@ -93,7 +93,9 @@ function buildQuestion(asg, q, body) {
     <div class="wa-actions">
       <button class="subtle" id="wa-to-problem">Use as problem text</button>
       <button class="subtle" id="wa-to-page">Add figures to page</button>
-    </div>`;
+    </div>
+    <div class="wa-ext muted small" id="wa-ext"></div>`;
+  showExtension(dep, body.querySelector('#wa-ext'));
   const root = body.querySelector('.wa-q').attachShadow({ mode: 'open' });
   root.innerHTML = (asg.styles || []).map(h => `<link rel="stylesheet" href="${esc(proxied(h))}">`).join('')
     + `<link rel="stylesheet" href="/vendor/mathlive/mathlive-static.css">
@@ -107,7 +109,7 @@ function buildQuestion(asg, q, body) {
       input.ap-text { background: #0f0f13; color: var(--text); border: 1px solid #2c2c34; border-radius: 6px; padding: 4px 6px; }
       .ap-mark.correct { color: #3fb950; } .ap-mark.incorrect { color: #ff7b72; }
       .ap-lock { font-size: 12px; opacity: .7; }
-    </style><div class="q">${proxied(q.html)}</div>`;
+    </style><div class="q qContent">${proxied(q.html)}</div>`;
   root.querySelectorAll('.ap-tex').forEach(el => {
     el.dataset.tex = el.textContent; // kept for "Use as problem text"
     try { el.innerHTML = ML.convertLatexToMarkup(el.textContent); } catch {}
@@ -161,6 +163,28 @@ function buildQuestion(asg, q, body) {
       if (blob.type === 'image/svg+xml') continue; // only bitmaps can be rendered for Claude
       await ctx.insertImage(new File([blob], `webassign-q${q.number}-${k + 1}.${blob.type.split('/')[1] || 'png'}`, { type: blob.type }));
     }
+  };
+}
+
+// Extension: WebAssign's automatic extension through AssignPad (auto extension is set in AssignPad)
+async function showExtension(dep, el) {
+  let d;
+  try { d = await ctx.call('GET', `/api/webassign/assignments/${dep}/extension`); } catch { el.remove(); return; }
+  const i = d.info;
+  if (!i || !i.available) { el.textContent = i ? 'No extensions for this assignment.' : ''; return; }
+  const left = i.unlimited_requests ? 99 : +i.requests_remaining || 0;
+  const can = ['automated', 'both'].includes(i.extension) && left > 0;
+  const penalty = i.points_deducted ? `WebAssign takes off ${i.points_deducted}${i.penalty_method === 'del' ? '%' : ' points'}.` : '';
+  el.innerHTML = `<span></span> ${can ? '<button class="subtle" id="wa-ext-req">Request extension</button>' : ''}`;
+  el.firstElementChild.textContent = `Extension: ${i.extension_message || ''} ${penalty} Requests left: ${i.unlimited_requests ? 'unlimited' : left}.`
+    + (d.enabled ? ` Auto: ${d.hours} h after due.` : '') + (d.last ? ` Last: ${d.last.ok ? '✓' : '✗'} ${d.last.message}` : '');
+  const btn = el.querySelector('#wa-ext-req');
+  if (btn) btn.onclick = async () => {
+    if (!confirm(`Request the automatic extension now? ${penalty}`)) return;
+    btn.disabled = true; btn.textContent = 'Requesting…';
+    try { await ctx.call('POST', `/api/webassign/assignments/${dep}/extension`); ctx.toast('Extension granted', 4000); }
+    catch (err) { ctx.toast(err.message, 6000); }
+    showExtension(dep, el);
   };
 }
 

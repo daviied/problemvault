@@ -6,7 +6,7 @@ Homework workspaces. One page per problem: paste the circuit or equation, work i
 - **Images**: paste (Ctrl+V), drop or upload (camera on a phone). Move with the lasso, resize from the corner, write on top.
 - **Text**: Text tool (T). Tap to type, `$…$` for math (KaTeX).
 - **Organised**: folders (course → assignment) with problems, drag to move, status (to do / working / done), search.
-- **CalcVault**: link a calculator per problem. Claude can put your givens and equations into it.
+- **CalcVault**: link a calculator per problem (search, suggested matches, grouped by folder; or create one in the matching folder). **Update Calc** (tablet bar and CalcVault tab): Claude checks your math; if it is right, it adds your givens and equations that are not in the calculator yet. If not, it marks the mistake and changes nothing.
 - **WebAssign** (through AssignPad): view the real question, answer it (MathLive) and Save / Submit, without leaving the problem. Import an assignment as one problem per question; put the question's figures on the page.
 - **Claude**: MCP server at `/mcp`. Claude reads your ink, posts notes in the side panel, and writes and draws on the page with you, live.
 - **PWA**: install it from the browser on laptop or phone (needs https, or localhost).
@@ -31,6 +31,7 @@ Needs your AssignPad server (the `Web-Assign` project) running. ProblemVault cal
 2. Panel → **WebAssign**:
    - No question linked: pick an assignment, then **Link here** on a question, or **Import all as problems** (a folder named after the assignment, one problem per question, problem text filled in).
    - Linked: the question with answer boxes. **Save** / **Submit** go to WebAssign; ✓ / ✗ show WebAssign's marks. **Refresh** reads it again. **Use as problem text** copies the question (cheap for Claude). **Add figures to page** puts its images on the page to write on.
+   - **Extension** (under the question): WebAssign's extension rule and **Request extension** (only the automatic extension). Auto extension (X hours after due, for assignments under 100%) is set in AssignPad.
 3. Claude: `webassign_read` gives the question and which answers WebAssign marked wrong.
 4. Tablet → **Submit** (only on a WebAssign problem): Claude checks your work. If it is right and each final answer is circled, Claude types your answers exactly as written into the math/text boxes and submits. Otherwise it marks what to fix and does not submit. Claude can submit only after you press Submit: one submission, within 15 minutes. Choice boxes (radio, select) you answer yourself.
 

@@ -302,6 +302,8 @@ class Handler(BaseHTTPRequestHandler):
             if len(rest) == 2 and rest[0] == "assignments" and method == "GET":
                 a = webassign.assignment(rest[1], refresh)
                 return self.send(200, {**a, "url": a.get("url") or webassign.open_url(rest[1])})
+            if len(rest) == 3 and rest[0] == "assignments" and rest[2] == "extension" and method in ("GET", "POST"):
+                return self.send(200, webassign.extension(rest[1], request=method == "POST"))
             if len(rest) == 4 and rest[0] == "assignments" and rest[2] == "questions" and method == "POST":
                 b = self.json_body()
                 answers = b.get("answers") if isinstance(b.get("answers"), dict) else {}
@@ -426,6 +428,8 @@ class Handler(BaseHTTPRequestHandler):
             if not text:
                 raise HttpError(400, "Empty question")
             q = {"id": "q" + store.new_id()[:6], "at": store.now_ms(), "text": text}
+            if preset == "calc" and not calcvault.enabled():
+                raise HttpError(400, "CalcVault is not connected (CALCVAULT_URL / CALCVAULT_PASSWORD)")
             if preset == "submit":
                 if not w.get("wa"):
                     raise HttpError(400, "No WebAssign question is linked to this problem")

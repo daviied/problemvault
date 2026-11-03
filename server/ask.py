@@ -56,6 +56,16 @@ PRESETS = {
              "give the next step yet. If everything so far is right: write ONLY the next step (one step, not "
              "the whole solution) on the page below my last line, as a hint I can follow. Never place text over "
              "my writing. Reply with a 1-2 line summary."),
+    "calc": ("Update CalcVault from my work",
+             "I pressed Update Calc. Read my math on this page (any ink you have not read yet) and check every given "
+             "and equation, step by step. Then call calcvault_read to see what the linked calculator already has. "
+             "If everything is right: call calcvault_add_lines ONCE with only what is not there yet, in the order I "
+             "wrote it: each given number as {role:'input', var, label, value} (value without units; label says "
+             "what it is), and each equation I wrote as {latex} with the same variable names as the inputs (solved "
+             "for the unknown, like 'I=\\frac{V}{R_1}'). Use my equations as I wrote them; do not add steps I did "
+             "not write. If something is wrong: do NOT change the calculator; mark the mistake on the page (draw at "
+             "it, write near_block) and tell me what to fix. Never place text over my writing. Reply with a 1-2 line "
+             "summary that says what you added, or why you added nothing."),
     "submit": ("Check and submit to WebAssign",
                "I pressed Submit. Call webassign_read (figures=false if you already saw them) and check ALL my work "
                "on this page. Submit ONLY if every step is right AND each answer box has a final answer I CIRCLED on "

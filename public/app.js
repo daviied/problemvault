@@ -534,7 +534,7 @@ $('#ask').onsubmit = async e => {
 };
 // Tablet: "Check with Claude" and "Next step" send a ready-made request (text is on the server)
 function setQuickBusy(busy) {
-  document.querySelectorAll('#quick button').forEach(b => { b.disabled = busy; });
+  document.querySelectorAll('#quick button, #calc-update').forEach(b => { b.disabled = busy; });
 }
 document.querySelectorAll('#quick button').forEach(b => b.addEventListener('click', async () => {
   if (!ws) return toast('Open a problem first');
@@ -545,7 +545,7 @@ document.querySelectorAll('#quick button').forEach(b => b.addEventListener('clic
     if (r.mode === 'cli') {
       setQuickBusy(true);
       $('#ask-state').textContent = `${aiName(r.by)} is working on it…`;
-      toast({ check: 'Claude is checking your work…', next: 'Claude is looking at your work…', submit: 'Claude is checking before it submits…' }[b.dataset.preset], 2500);
+      toast({ check: 'Claude is checking your work…', next: 'Claude is looking at your work…', submit: 'Claude is checking before it submits…', calc: 'Claude is checking your math for CalcVault…' }[b.dataset.preset], 2500);
     } else {
       copy(r.prompt);
       toast('Copied: paste it into Claude (ProblemVault connector on)', 3500);
@@ -583,16 +583,20 @@ $('#forget-btn').onclick = async () => {
 // CalcVault tab
 // ---------------------------------------------------------------------------
 
+let calcPicking = false; // linked, but choosing another calculator
+let calcTree = null;
+
 async function renderCalc() {
   const cv = state.calcvault;
   $('#calc-off').hidden = cv.enabled;
   $('#calc-on').hidden = !cv.enabled;
   if (!cv.enabled || !ws) return;
   const linked = ws.meta.calc;
-  $('#calc-linked').hidden = !linked;
-  $('#calc-unlinked').hidden = !!linked;
+  if (!linked) calcPicking = false;
+  $('#calc-linked').hidden = !linked || calcPicking;
+  $('#calc-unlinked').hidden = !!linked && !calcPicking;
   $('#calc-open').href = cv.url || '#';
-  if (linked) {
+  if (linked && !calcPicking) {
     $('#calc-name').textContent = linked.name;
     const ol = $('#calc-lines');
     ol.innerHTML = '<li class="muted">Loading…</li>';
@@ -610,25 +614,87 @@ async function renderCalc() {
     } catch (err) {
       ol.innerHTML = `<li class="muted">${esc(err.message)}</li>`;
     }
-  } else {
-    const sel = $('#calc-pick');
-    try {
-      const t = await call('GET', '/api/calcvault/tree');
-      const folderName = id => t.folders.find(f => f.id === id)?.name;
-      sel.innerHTML = '<option value="">Choose…</option>' + t.calculators
-        .map(c => `<option value="${c.id}">${esc((folderName(c.folder_id) ? folderName(c.folder_id) + ' / ' : '') + c.name)}</option>`).join('');
-    } catch (err) {
-      sel.innerHTML = `<option value="">${esc(err.message)}</option>`;
-    }
+    return;
   }
+  // Picker: create a new calculator (folder guessed from the problem's folders), or search and link one
+  $('#calc-pick-title').textContent = linked ? 'Change calculator' : 'Link a calculator';
+  $('#calc-cancel').hidden = !linked;
+  $('#calc-new-name').value = ws.meta.title;
+  $('#calc-search').value = '';
+  $('#calc-list').innerHTML = '<p class="muted small">Loading…</p>';
+  try {
+    calcTree = await call('GET', '/api/calcvault/tree');
+  } catch (err) {
+    $('#calc-list').innerHTML = `<p class="muted small">${esc(err.message)}</p>`;
+    return;
+  }
+  const path = id => {
+    const out = [];
+    for (let f = calcTree.folders.find(x => x.id === id); f && out.length < 8; f = calcTree.folders.find(x => x.id === f.parent_id)) out.unshift(f.name);
+    return out.join(' / ');
+  };
+  calcTree.calculators.forEach(c => { c.path = path(c.folder_id); });
+  const pvFolders = folderPath(ws.meta.folder).map(n => n.toLowerCase());
+  const guess = [...calcTree.folders].reverse().find(f => pvFolders.includes(f.name.toLowerCase()));
+  $('#calc-new-folder').innerHTML = '<option value="">No folder</option>' + calcTree.folders
+    .map(f => ({ id: f.id, p: path(f.id) })).sort((x, y) => x.p.localeCompare(y.p))
+    .map(f => `<option value="${f.id}"${guess && guess.id === f.id ? ' selected' : ''}>${esc(f.p)}</option>`).join('');
+  renderCalcList();
 }
+
+// Names of the problem's folders, outermost first (course, assignment)
+function folderPath(id) {
+  const out = [];
+  for (let f = state.index.folders.find(x => x.id === id); f && out.length < 8; f = state.index.folders.find(x => x.id === f.parent)) out.unshift(f.name);
+  return out;
+}
+
+function renderCalcList() {
+  const list = $('#calc-list');
+  if (!calcTree) return;
+  const q = $('#calc-search').value.trim().toLowerCase();
+  const words = [ws.meta.title, ...folderPath(ws.meta.folder)].join(' ').toLowerCase().split(/[^a-z0-9#.]+/).filter(w => w.length > 1);
+  const score = c => words.filter(w => `${c.name} ${c.path}`.toLowerCase().includes(w)).length;
+  const calcs = calcTree.calculators.filter(c => !q || `${c.name} ${c.path}`.toLowerCase().includes(q));
+  const cur = ws.meta.calc?.id;
+  const item = (c, showPath) => `<button data-id="${c.id}"${c.id === cur ? ' class="current"' : ''}><span class="n">${esc(c.name)}</span>
+    ${showPath && c.path ? `<span class="f">${esc(c.path)}</span>` : ''}${c.id === cur ? '<span class="f">linked</span>' : ''}</button>`;
+  let html = '';
+  if (!q) {
+    const sugg = calcs.map(c => [score(c), c]).filter(([n]) => n > 0).sort((x, y) => y[0] - x[0]).slice(0, 4).map(([, c]) => c);
+    if (sugg.length) html += '<h4>Suggested</h4>' + sugg.map(c => item(c, true)).join('');
+  }
+  const groups = new Map();
+  for (const c of [...calcs].sort((x, y) => x.name.localeCompare(y.name))) {
+    if (!groups.has(c.path)) groups.set(c.path, []);
+    groups.get(c.path).push(c);
+  }
+  for (const [p, cs] of [...groups].sort((x, y) => (!x[0]) - (!y[0]) || x[0].localeCompare(y[0]))) {
+    html += `<h4>${esc(p || 'No folder')}</h4>` + cs.map(c => item(c, false)).join('');
+  }
+  list.innerHTML = html || `<p class="muted small">${q ? 'No calculator matches.' : 'No calculators yet. Create one above.'}</p>`;
+}
+$('#calc-search').addEventListener('input', renderCalcList);
+$('#calc-list').addEventListener('click', async e => {
+  const b = e.target.closest('button[data-id]');
+  if (!b) return;
+  calcPicking = false;
+  try { await call('POST', `/api/ws/${ws.meta.id}/calc`, { id: Number(b.dataset.id) }); } catch (err) { toast(err.message); }
+  renderCalc();
+});
 $('#calc-create').onclick = async () => {
-  try { await call('POST', `/api/ws/${ws.meta.id}/calc`, { create: true, name: ws.meta.title }); } catch (err) { toast(err.message); }
+  const name = $('#calc-new-name').value.trim() || ws.meta.title;
+  const folder = $('#calc-new-folder').value;
+  calcPicking = false;
+  try { await call('POST', `/api/ws/${ws.meta.id}/calc`, { create: true, name, folder_id: folder ? Number(folder) : null }); }
+  catch (err) { toast(err.message); }
+  renderCalc();
 };
-$('#calc-pick').onchange = async e => {
-  if (e.target.value) await call('POST', `/api/ws/${ws.meta.id}/calc`, { id: Number(e.target.value) }).catch(err => toast(err.message));
-};
+$('#calc-new-name').addEventListener('keydown', e => { if (e.key === 'Enter') $('#calc-create').click(); });
+$('#calc-change').onclick = () => { calcPicking = true; renderCalc(); };
+$('#calc-cancel').onclick = () => { calcPicking = false; renderCalc(); };
 $('#calc-unlink').onclick = () => call('DELETE', `/api/ws/${ws.meta.id}/calc`);
+$('#calc-update').onclick = () => document.querySelector('#quick [data-preset=calc]').click();
 $('#calc-refresh').onclick = () => renderCalc();
 
 webassign.init({

@@ -70,6 +70,13 @@ def submit(dep, box, answers, action):
     return _request("POST", f"/api/assignments/{dep}/questions/{box}", {"answers": answers, "action": action}, timeout=130)
 
 
+def extension(dep, request=False):
+    """Extension info for an assignment, or (request=True) ask for WebAssign's automatic extension."""
+    if not str(dep).isdigit():
+        raise WebAssignError("bad assignment id")
+    return _request("POST" if request else "GET", f"/api/assignments/{dep}/extension", {} if request else None, timeout=200)
+
+
 def proxy(u):
     """(bytes, content type) of a question image / stylesheet, through AssignPad."""
     return _request("GET", "/api/proxy?u=" + urllib.parse.quote(u, safe=""), raw=True, timeout=30)
