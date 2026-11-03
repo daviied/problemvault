@@ -72,8 +72,8 @@
         <div class="group" id="dashes"></div>
         <span class="grow"></span>
         <div class="group">
-          <button id="add-image" aria-label="Add image" title="Add an image (or paste / drop one)"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.6"/><path d="M21 16l-5-5-8 8"/></svg></button>
-          <input type="file" id="img-file" accept="image/*" multiple hidden>
+          <button id="add-image" aria-label="Add image" title="Add an image or PDF (or paste / drop one)"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.6"/><path d="M21 16l-5-5-8 8"/></svg></button>
+          <input type="file" id="img-file" accept="image/*,application/pdf,.pdf" multiple hidden>
           <button id="paste" aria-label="Paste" title="Paste" hidden><svg viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M9 11h6M9 15h4"/></svg></button>
           <button id="undo" aria-label="Undo" title="Undo"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
           <button id="redo" aria-label="Redo" title="Redo"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg></button>
@@ -93,12 +93,13 @@
         <label class="row"><input type="checkbox" id="opt-finger"> Finger draws (no pen)</label>
         <label class="row"><input type="checkbox" id="opt-dark"> Black canvas</label>
         <hr>
+        <button class="row" id="act-pdf">Export PDF (my writing only)</button>
         <button class="row" id="act-extend">Add space below</button>
         <button class="row" id="act-fit">Fit to width</button>
         <button class="row" id="act-fullscreen">Toggle fullscreen</button>
         <hr>
         <button class="row danger" id="act-clear">Clear page</button>
-        <p class="hint">Fingers don't draw unless you turn that on, so rest your palm anywhere. Two fingers pan &amp; zoom, Ctrl+wheel zooms. Pen eraser end or side button erases. Paste (Ctrl+V) or drop an image to write on it.</p>
+        <p class="hint">Fingers don't draw unless you turn that on, so rest your palm anywhere. Two fingers pan &amp; zoom, Ctrl+wheel zooms. Pen eraser end or side button erases. Paste (Ctrl+V) or drop an image or PDF to write on it.</p>
       </div>
       <div class="board-row">
         <div id="stage"><canvas id="base"></canvas><div id="texts"></div><canvas id="live"></canvas></div>

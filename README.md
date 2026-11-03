@@ -4,6 +4,7 @@ Homework workspaces. One page per problem: paste the circuit or equation, work i
 
 - **Drawing**: InkVault's ink engine (`public/ink.js`) and tools: pen / pencil / highlighter, pressure and tilt, colours, sizes, dashed and dotted lines, scribble-to-erase, stroke or precise eraser, pen eraser end, lasso (move, copy, cut, duplicate, delete, paste), undo / redo, two-finger pan and zoom, palm rejection, black canvas, growing page.
 - **Images**: paste (Ctrl+V), drop or upload (camera on a phone). Move with the lasso, resize from the corner, write on top.
+- **PDFs**: upload, drop or paste a PDF. Each page becomes an image, stacked down the problem below your work (one undo). **⋯ → Export PDF (my writing only)** downloads a PDF with the pages, your ink and your typed text. Claude's ink and notes are left out. Work outside the PDF pages becomes extra pages.
 - **Text**: Text tool (T). Tap to type, `$…$` for math (KaTeX).
 - **Organised**: folders (course → assignment) with problems, drag to move, status (to do / working / done), search.
 - **CalcVault**: link a calculator per problem (search, suggested matches, grouped by folder; or create one in the matching folder). **Update Calc** (tablet bar and CalcVault tab): Claude checks your math; if it is right, it adds your givens and equations that are not in the calculator yet. If not, it marks the mistake and changes nothing.

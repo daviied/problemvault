@@ -344,6 +344,17 @@ def sanitize_image(i):
         "w": _num(i.get("w"), 4, 1e5, 100),
         "h": _num(i.get("h"), 4, 1e5, 100),
         **({"name": str(i["name"])[:120]} if i.get("name") else {}),
+        **({"pdf": _pdf_meta(i["pdf"])} if isinstance(i.get("pdf"), dict) else {}),
+    }
+
+
+def _pdf_meta(m):
+    return {
+        "name": str(m.get("name") or "")[:100],
+        "page": int(_num(m.get("page"), 1, 10000, 1)),
+        "n": int(_num(m.get("n"), 1, 10000, 1)),
+        "pw": _num(m.get("pw"), 1, 20000, 612),
+        "ph": _num(m.get("ph"), 1, 20000, 792),
     }
 
 

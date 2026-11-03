@@ -978,29 +978,7 @@ export async function insertImage(file) {
       w = cv.width;
       h = cv.height;
     }
-    // RGB copy on white (transparent PNGs become white, like paper)
-    const k = Math.min(1, RGB_MAX_SIDE / Math.max(w, h));
-    const cv = document.createElement('canvas');
-    cv.width = Math.max(1, Math.round(w * k));
-    cv.height = Math.max(1, Math.round(h * k));
-    const cx = cv.getContext('2d');
-    cx.fillStyle = '#fff';
-    cx.fillRect(0, 0, cv.width, cv.height);
-    cx.drawImage(img, 0, 0, cv.width, cv.height);
-    const rgba = cx.getImageData(0, 0, cv.width, cv.height).data;
-    const rgb = new Uint8Array(cv.width * cv.height * 3);
-    for (let i = 0, j = 0; i < rgba.length; i += 4, j += 3) {
-      rgb[j] = rgba[i]; rgb[j + 1] = rgba[i + 1]; rgb[j + 2] = rgba[i + 2];
-    }
-    const deflated = await new Response(new Blob([rgb]).stream().pipeThrough(new CompressionStream('deflate'))).arrayBuffer();
-    const imgId = uid();
-    await api.uploadImage(id, {
-      id: imgId,
-      mime,
-      name: file.name || '',
-      data: await b64(await blob.arrayBuffer()),
-      rgb: { w: cv.width, h: cv.height, data: await b64(deflated) },
-    });
+    const imgId = await uploadPicture(id, img, w, h, blob, mime, file.name || '');
     if (!current || current.id !== id) return;
     // place it at the top of the visible area, at most page-width wide
     const dispW = Math.min(PAGE_WIDTH - 80, Math.max(160, w / (window.devicePixelRatio || 1)));
@@ -1028,6 +1006,256 @@ export async function insertImage(file) {
   }
 }
 
+// RGB copy on white (transparent PNGs become white, like paper), then upload.
+async function uploadPicture(id, src, w, h, blob, mime, name) {
+  const k = Math.min(1, RGB_MAX_SIDE / Math.max(w, h));
+  const cv = document.createElement('canvas');
+  cv.width = Math.max(1, Math.round(w * k));
+  cv.height = Math.max(1, Math.round(h * k));
+  const cx = cv.getContext('2d');
+  cx.fillStyle = '#fff';
+  cx.fillRect(0, 0, cv.width, cv.height);
+  cx.drawImage(src, 0, 0, cv.width, cv.height);
+  const rgba = cx.getImageData(0, 0, cv.width, cv.height).data;
+  const rgb = new Uint8Array(cv.width * cv.height * 3);
+  for (let i = 0, j = 0; i < rgba.length; i += 4, j += 3) {
+    rgb[j] = rgba[i]; rgb[j + 1] = rgba[i + 1]; rgb[j + 2] = rgba[i + 2];
+  }
+  const deflated = await new Response(new Blob([rgb]).stream().pipeThrough(new CompressionStream('deflate'))).arrayBuffer();
+  const imgId = uid();
+  await api.uploadImage(id, {
+    id: imgId,
+    mime,
+    name,
+    data: await b64(await blob.arrayBuffer()),
+    rgb: { w: cv.width, h: cv.height, data: await b64(deflated) },
+  });
+  return imgId;
+}
+
+// ---------------------------------------------------------------------------
+// PDFs: each page becomes an image, stacked down the problem below what is
+// already there. Export rebuilds a PDF with only your writing (Claude's ink
+// and notes are left out).
+// ---------------------------------------------------------------------------
+
+const PDF_RENDER_W = 1700; // pixels per page width (~200 dpi for Letter)
+const PDF_MARGIN = 20; // page units left / right of each PDF page
+const PDF_GAP = 30; // page units between PDF pages
+const PDF_MAX_PAGES = 80;
+let pdfjsLib = null;
+
+async function loadPdfjs() {
+  if (!pdfjsLib) {
+    pdfjsLib = await import(new URL('./vendor/pdfjs/pdf.min.mjs', import.meta.url).href);
+    pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('./vendor/pdfjs/pdf.worker.min.mjs', import.meta.url).href;
+  }
+  return pdfjsLib;
+}
+
+const isPdf = f => f && (f.type === 'application/pdf' || /\.pdf$/i.test(f.name || ''));
+
+export function insertFile(file) {
+  return isPdf(file) ? insertPdf(file) : insertImage(file);
+}
+
+async function insertFiles(list) {
+  for (const f of list || []) await insertFile(f); // one at a time, so PDFs stack in order
+}
+
+function contentBottom() {
+  const d = current.drawing;
+  let y = 0;
+  for (const s of d.strokes) for (const p of s.pts) y = Math.max(y, p[1]);
+  for (const im of d.images) y = Math.max(y, im.y + im.h);
+  for (const t of d.texts || []) y = Math.max(y, textBox(t).maxY);
+  return y;
+}
+
+export async function insertPdf(file) {
+  if (!current || readOnly || !file) return;
+  const id = current.id;
+  const name = (file.name || 'document.pdf').slice(0, 100);
+  try {
+    api.toast('Opening PDF…', 4000);
+    const lib = await loadPdfjs();
+    const doc = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+    let n = doc.numPages;
+    if (n > PDF_MAX_PAGES && !confirm(`This PDF has ${n} pages. Add only the first ${PDF_MAX_PAGES}?`)) return;
+    n = Math.min(n, PDF_MAX_PAGES);
+    const dispW = PAGE_WIDTH - PDF_MARGIN * 2;
+    let y = contentBottom();
+    y = y > 0 ? Math.round(y + 60) : PDF_MARGIN;
+    const added = [];
+    for (let i = 1; i <= n; i++) {
+      api.toast(`Adding PDF page ${i} of ${n}…`, 60000);
+      const page = await doc.getPage(i);
+      const base = page.getViewport({ scale: 1 }); // PDF points
+      const vp = page.getViewport({ scale: PDF_RENDER_W / base.width });
+      const cv = document.createElement('canvas');
+      cv.width = Math.round(vp.width);
+      cv.height = Math.round(vp.height);
+      const cx = cv.getContext('2d');
+      cx.fillStyle = '#fff';
+      cx.fillRect(0, 0, cv.width, cv.height);
+      await page.render({ canvasContext: cx, viewport: vp }).promise;
+      page.cleanup();
+      const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.88));
+      const imgId = await uploadPicture(id, cv, cv.width, cv.height, blob, 'image/jpeg', `${name} p${i}`);
+      if (!current || current.id !== id) return;
+      const h = Math.round(dispW * cv.height / cv.width);
+      const im = {
+        id: imgId, z: Date.now() + i, x: PDF_MARGIN, y, w: dispW, h,
+        name: `${name} p${i}`.slice(0, 120),
+        pdf: { name, page: i, n, pw: Math.round(base.width * 100) / 100, ph: Math.round(base.height * 100) / 100 },
+      };
+      const el = new Image();
+      el.onload = () => { dirty.base = dirty.live = true; };
+      el.src = URL.createObjectURL(blob);
+      bitmaps.set(imgId, el);
+      added.push(im);
+      y += h + PDF_GAP;
+    }
+    doc.destroy();
+    if (!added.length) return;
+    commit(growFor([], { imgAdd: added }, added)); // one undo for the whole PDF
+    api.toast(`Added ${added.length} PDF page${added.length > 1 ? 's' : ''}. Write on them, then use ⋯ → Export PDF.`, 4000);
+  } catch (err) {
+    if (/password/i.test(err?.name || err?.message || '')) api.toast('That PDF is password-protected. Remove the password first.', 5000);
+    else reportError(err);
+  }
+}
+
+// --- export -----------------------------------------------------------------
+
+const LETTER = { pw: 612, ph: 792 };
+
+// Page regions in reading order: every PDF page, plus Letter-size pages for
+// your work in the space above, between or below them.
+function exportRegions(d, studentStrokes, studentTexts) {
+  const pdfs = d.images.filter(i => i.pdf).sort((a, b) => a.y - b.y || a.x - b.x);
+  const regions = pdfs.map(i => ({ x: i.x, y: i.y, w: i.w, h: i.h, pw: i.pdf.pw || LETTER.pw }));
+  const boxes = [
+    ...studentStrokes.map(s => strokeBBox(s)),
+    ...d.images.filter(i => !i.pdf).map(i => ({ minX: i.x, minY: i.y, maxX: i.x + i.w, maxY: i.y + i.h })),
+    ...studentTexts.map(t => textBox(t)),
+  ];
+  const covered = b => regions.some(r => b.minX >= r.x - 2 && b.maxX <= r.x + r.w + 2 && b.minY >= r.y - 2 && b.maxY <= r.y + r.h + 2);
+  const loose = boxes.filter(b => !covered(b)).sort((a, b) => a.minY - b.minY);
+  const sliceH = Math.round(PAGE_WIDTH * LETTER.ph / LETTER.pw);
+  const extra = [];
+  for (const b of loose) {
+    if (extra.some(r => b.minY >= r.y && b.minY < r.y + r.h)) continue; // starts on a page we already have
+    let y = Math.max(0, Math.floor(b.minY - 30));
+    const inside = regions.find(r => y >= r.y && y < r.y + r.h);
+    if (inside) y = inside.y + inside.h; // don't repeat a PDF page
+    const next = Math.min(...regions.filter(r => r.y > y).map(r => r.y), Infinity);
+    const h = Math.min(sliceH, next - y);
+    if (h >= 20) extra.push({ x: 0, y, w: PAGE_WIDTH, h, pw: LETTER.pw });
+  }
+  return [...regions, ...extra].sort((a, b) => a.y - b.y || a.x - b.x);
+}
+
+function wrapText(cx, text, maxW) {
+  const lines = [];
+  for (const para of text.split('\n')) {
+    let line = '';
+    for (const word of para.split(/\s+/)) {
+      const t = line ? line + ' ' + word : word;
+      if (line && cx.measureText(t).width > maxW) { lines.push(line); line = word; } else line = t;
+    }
+    lines.push(line);
+  }
+  return lines;
+}
+
+const plainText = md => md.replace(/\$\$?([^$]*)\$\$?/g, '$1').replace(/\\(,|;|!|quad)/g, ' ').replace(/\\([a-zA-Z]+)/g, '$1').replace(/[{}]/g, '').replace(/[*_`#]/g, '');
+
+async function loadAllBitmaps(images) {
+  loadBitmaps();
+  await Promise.all(images.map(im => {
+    const el = bitmaps.get(im.id);
+    if (!el || (el.complete && el.naturalWidth)) return null;
+    return el.decode().catch(() => null);
+  }));
+}
+
+export async function exportPdf() {
+  if (!current) return;
+  const d = current.drawing;
+  const strokes = d.strokes.filter(s => s.by !== 'claude');
+  const texts = (d.texts || []).filter(t => t.by !== 'claude');
+  if (!strokes.length && !d.images.length && !texts.length) { api.toast('Nothing to export yet.', 2500); return; }
+  try {
+    api.toast('Making PDF…', 60000);
+    await loadAllBitmaps(d.images);
+    const bm = readyBitmaps();
+    const mine = { ...d, strokes, texts: [] };
+    const pages = [];
+    for (const r of exportRegions(d, strokes, texts)) {
+      const k = PDF_RENDER_W / r.w;
+      const cv = document.createElement('canvas');
+      cv.width = Math.round(r.w * k);
+      cv.height = Math.round(r.h * k);
+      const cx = cv.getContext('2d');
+      cx.fillStyle = '#fff';
+      cx.fillRect(0, 0, cv.width, cv.height);
+      cx.setTransform(k, 0, 0, k, -r.x * k, -r.y * k);
+      drawPage(cx, mine, { bitmaps: bm });
+      for (const t of texts) { // your typed text, as plain text
+        cx.fillStyle = t.color || '#1f1f1f';
+        cx.font = `${t.size}px system-ui, sans-serif`;
+        cx.textBaseline = 'top';
+        wrapText(cx, plainText(t.md), t.w).forEach((line, n) => cx.fillText(line, t.x, t.y + n * t.size * 1.35));
+      }
+      const blob = await new Promise(res => cv.toBlob(res, 'image/jpeg', 0.9));
+      pages.push({ jpeg: new Uint8Array(await blob.arrayBuffer()), w: cv.width, h: cv.height, pw: r.pw, ph: r.pw * r.h / r.w });
+    }
+    const title = ($('#ws-title')?.value || d.images.find(i => i.pdf)?.pdf.name || 'problem').replace(/\.pdf$/i, '');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([buildPdf(pages)], { type: 'application/pdf' }));
+    a.download = `${title.replace(/[\\/:*?"<>|]+/g, '_').trim() || 'problem'}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+    api.toast(`Exported ${pages.length} page${pages.length > 1 ? 's' : ''} (your writing only).`, 3000);
+  } catch (err) {
+    reportError(err);
+  }
+}
+
+// Minimal PDF writer: one full-page JPEG per page.
+function buildPdf(pages) {
+  const enc = new TextEncoder();
+  const parts = [];
+  const offsets = [];
+  let len = 0;
+  const push = b => { const u = typeof b === 'string' ? enc.encode(b) : b; parts.push(u); len += u.length; };
+  const obj = (n, body) => { offsets[n] = len; push(`${n} 0 obj\n`); for (const b of [].concat(body)) push(b); push('\nendobj\n'); };
+  const f = n => (Math.round(n * 100) / 100).toString();
+  push('%PDF-1.4\n%âãÏÓ\n');
+  const kids = pages.map((_, i) => `${3 + i * 3} 0 R`).join(' ');
+  obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
+  obj(2, `<< /Type /Pages /Kids [${kids}] /Count ${pages.length} >>`);
+  pages.forEach((p, i) => {
+    const n = 3 + i * 3;
+    const content = `q ${f(p.pw)} 0 0 ${f(p.ph)} 0 0 cm /Im0 Do Q`;
+    obj(n, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${f(p.pw)} ${f(p.ph)}] /Resources << /XObject << /Im0 ${n + 2} 0 R >> >> /Contents ${n + 1} 0 R >>`);
+    obj(n + 1, [`<< /Length ${content.length} >>\nstream\n`, content, '\nendstream']);
+    obj(n + 2, [`<< /Type /XObject /Subtype /Image /Width ${p.w} /Height ${p.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${p.jpeg.length} >>\nstream\n`, p.jpeg, '\nendstream']);
+  });
+  const count = 3 + pages.length * 3;
+  const xref = len;
+  let x = `xref\n0 ${count}\n0000000000 65535 f \n`;
+  for (let n = 1; n < count; n++) x += `${String(offsets[n]).padStart(10, '0')} 00000 n \n`;
+  push(x + `trailer\n<< /Size ${count} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+  const out = new Uint8Array(len);
+  let o = 0;
+  for (const u of parts) { out.set(u, o); o += u.length; }
+  return out;
+}
+
 async function b64(buf) {
   // FileReader is the fast path for big buffers
   const url = await new Promise(r => { const f = new FileReader(); f.onload = () => r(f.result); f.readAsDataURL(new Blob([buf])); });
@@ -1036,9 +1264,9 @@ async function b64(buf) {
 
 document.addEventListener('paste', e => {
   if (!current || readOnly || e.target.closest?.('input, textarea, [contenteditable]')) return;
-  const file = [...(e.clipboardData?.items || [])].find(i => i.kind === 'file' && i.type.startsWith('image/'))?.getAsFile();
+  const file = [...(e.clipboardData?.items || [])].find(i => i.kind === 'file' && (i.type.startsWith('image/') || i.type === 'application/pdf'))?.getAsFile();
   e.preventDefault();
-  if (file) insertImage(file);
+  if (file) insertFile(file);
   else pasteStrokes();
 });
 stage.addEventListener('dragover', e => { e.preventDefault(); stage.classList.add('drop'); });
@@ -1047,10 +1275,10 @@ stage.addEventListener('drop', e => {
   e.preventDefault();
   stage.classList.remove('drop');
   if (readOnly) return;
-  for (const f of e.dataTransfer?.files || []) insertImage(f);
+  insertFiles(e.dataTransfer?.files);
 });
 $('#img-file').addEventListener('change', e => {
-  for (const f of e.target.files) insertImage(f);
+  insertFiles([...e.target.files]);
   e.target.value = '';
 });
 $('#add-image').onclick = () => $('#img-file').click();
@@ -1232,6 +1460,7 @@ $('#opt-dark').onchange = e => {
 };
 $('#opt-precise').onchange = e => { settings.eraser.mode = e.target.checked ? 'precise' : 'stroke'; save(); };
 $('#opt-finger').onchange = e => { settings.fingerDraws = e.target.checked; save(); };
+$('#act-pdf').onclick = () => { closeMenu(); exportPdf(); };
 $('#act-extend').onclick = () => { if (current) commit({ height: current.drawing.height + 400 }); closeMenu(); };
 $('#act-fit').onclick = () => { fitWidth(); closeMenu(); };
 $('#act-clear').onclick = () => {
