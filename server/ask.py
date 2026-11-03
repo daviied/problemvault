@@ -70,8 +70,9 @@ PRESETS = {
                "I pressed Submit. Call webassign_read (figures=false if you already saw them) and check ALL my work "
                "on this page. Submit ONLY if every step is right AND each answer box has a final answer I CIRCLED on "
                "the page. Then call webassign_submit with each answer EXACTLY as I wrote it (same digits, rounding "
-               "and sign; no units); do not fix or round it for me. If anything is wrong, an answer is not circled, "
-               "or a box needs a choice (radio/select): do NOT submit; mark the problem on the page (draw at it, "
+               "and sign; no units); do not fix or round it for me. For multiple-choice, select-all and drop-down boxes, "
+               "use the option(s) I circled or wrote on the page (option values are in webassign_read); never guess. "
+               "If anything is wrong, an answer is not circled or marked, or the question has a graph box: do NOT submit; mark the problem on the page (draw at it, "
                "write near_block) and tell me what to fix. Never place text over my writing. Reply with a 1-2 line "
                "summary that says whether you submitted and what WebAssign marked."),
 }

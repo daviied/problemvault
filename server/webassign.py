@@ -116,9 +116,28 @@ class _Text(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.out, self.tex, self.skip = [], None, 0
+        self.options = {}  # choice box name -> [[value, label], ...]
+        self.opt = None    # option whose label is being read
+        self.select = None
+        self.in_label = 0
 
     def handle_starttag(self, tag, attrs):
         a = dict(attrs)
+        if tag == "label":
+            self.in_label += 1
+        if tag in ("input", "option", "select") or tag in ("br", "p", "div", "li", "tr") and not self.in_label:
+            self.opt = None  # an option label ends at the next box, or a block outside its <label>
+        if tag == "input" and a.get("type") in ("radio", "checkbox") and a.get("name"):
+            self.opt = [a.get("value", ""), ""]
+            self.options.setdefault(a["name"], []).append(self.opt)
+            self.out.append(f" ({'○' if a['type'] == 'radio' else '☐'} value {a.get('value', '')}) ")
+        elif tag == "select" and a.get("name"):
+            self.select = a["name"]
+            self.out.append(f" [drop-down {a['name']}: ")
+        elif tag == "option" and self.select:
+            self.opt = [a.get("value", ""), ""]
+            self.options.setdefault(self.select, []).append(self.opt)
+            self.out.append(f" value {a.get('value', '')} = ")
         if tag in ("style", "script"):
             self.skip += 1
         elif "ap-tex" in (a.get("class") or ""):
@@ -131,6 +150,14 @@ class _Text(HTMLParser):
             self.out.append("\n")
 
     def handle_endtag(self, tag):
+        if tag == "label":
+            self.in_label = max(0, self.in_label - 1)
+        if tag == "select":
+            self.select, self.opt = None, None
+            self.out.append("] ")
+        elif tag == "option":
+            self.out.append(";")
+            self.opt = None
         if tag in ("style", "script"):
             self.skip = max(0, self.skip - 1)
         elif tag == "span" and self.tex is not None:
@@ -142,6 +169,15 @@ class _Text(HTMLParser):
         if self.skip:
             return
         (self.tex if self.tex is not None else self.out).append(data)
+        if self.opt is not None:
+            self.opt[1] = (self.opt[1] + data)[:200]
+
+
+def choice_options(q):
+    """{box name: [[value, label], ...]} for radio, checkbox and drop-down boxes."""
+    p = _Text()
+    p.feed(q.get("html") or "")
+    return {n: [[v, re.sub(r"\s+", " ", htmllib.unescape(t)).strip()] for v, t in opts] for n, opts in p.options.items()}
 
 
 def question_text(q):
@@ -163,5 +199,10 @@ def summarize(a, q):
         for i, p in enumerate(q["parts"], 1):
             state = p.get("mark") or ("answered" if p.get("value") else "empty")
             lock = ", locked" if not p.get("enabled", True) else ""
-            lines.append(f"{i}. {p.get('name')}: {p.get('kind')} ({state}{lock})")
+            size = f" {p.get('rows')}x{p.get('cols')}, value {p.get('value') or 'empty'}" if p.get("kind") == "matrix" else ""
+            if p.get("kind") in ("radio", "checkbox", "select"):
+                size = f", value {p.get('value')!r}" if p.get("value") not in (None, "", []) else ""
+            if p.get("kind") == "graph":
+                size = " (WebAssign graphing tool: the student answers it on WebAssign)"
+            lines.append(f"{i}. {p.get('name')}: {p.get('kind')}{size} ({state}{lock})")
     return "\n".join(lines)

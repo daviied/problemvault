@@ -101,23 +101,70 @@ function buildQuestion(asg, q, body) {
     + `<link rel="stylesheet" href="/vendor/mathlive/mathlive-static.css">
     <style>
       :host { display: block; color: var(--text); overflow-x: auto; }
-      .ap-box { display: inline-flex; align-items: center; gap: 4px; vertical-align: middle; margin: 2px 0; white-space: normal; }
+      .ap-box { display: inline-flex; align-items: center; gap: 4px; vertical-align: middle; margin: 2px 0; white-space: normal; cursor: text; }
+      /* Keep "( [answer] )" on one line. A long answer scrolls inside its box. */
       .watexline:has(.ap-box), .watexinlineblock:has(.ap-box) { white-space: nowrap; }
-      [class*="watex"] { border-color: currentColor !important; }
-      img:not([src*=".svg"]) { filter: invert(.9) hue-rotate(180deg); max-width: 100%; }
-      math-field { min-width: 90px; font-size: 18px; background: #0f0f13; color: var(--text); border: 1px solid #2c2c34; border-radius: 6px; }
-      input.ap-text { background: #0f0f13; color: var(--text); border: 1px solid #2c2c34; border-radius: 6px; padding: 4px 6px; }
-      .ap-mark.correct { color: #3fb950; } .ap-mark.incorrect { color: #ff7b72; }
+      .ap-box math-field { max-width: min(60vw, 520px); }
+      /* WebAssign draws fraction bars, roots and borders in black: use the text colour. */
+      .q [class*="watex"] { border-color: currentColor !important; }
+      /* WebAssign CSS sets black text on some parts. Use one text colour; keep the author's real colours. */
+      .q *:not([style*="color"]):not(font[color]):not(.ap-mark) { color: inherit !important; }
+      .q { color: var(--text) !important; }
+      img { max-width: 100%; height: auto; }
+      img:not([src*=".svg"]) { filter: invert(.9) hue-rotate(180deg); }
+      math-field { min-width: 110px; font-size: 1.15em; padding: 2px 6px; background: #0f0f13; color: var(--text);
+        border: 1px solid #2c2c34; border-radius: 6px; --caret-color: var(--accent);
+        --selection-background-color: color-mix(in srgb, var(--accent) 25%, transparent); --selection-color: var(--text);
+        --contains-highlight-background-color: color-mix(in srgb, var(--accent) 14%, transparent);
+        --highlight-text: color-mix(in srgb, var(--accent) 14%, transparent); }
+      math-field:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+      math-field[readonly] { opacity: .7; border-style: dashed; }
+      math-field::part(menu-toggle) { display: none; }
+      input.ap-text { font: inherit; background: #0f0f13; color: var(--text); border: 1px solid #2c2c34; border-radius: 6px; padding: 4px 6px; }
+      input.ap-text:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+      .ap-mx { border-collapse: separate; border-spacing: 4px; border-left: 2px solid currentColor;
+        border-right: 2px solid currentColor; border-radius: 6px; display: inline-table; vertical-align: middle; }
+      .ap-cell { width: 4.5em; text-align: center; }
+      .ap-mx-btns { display: inline-flex; flex-direction: column; gap: 2px; vertical-align: middle; margin-left: 4px; }
+      .ap-mx-btns button { font-size: 11px; padding: 1px 6px; border-radius: 4px; border: 1px solid #2c2c34;
+        background: #17171c; color: var(--text); cursor: pointer; }
+      .ap-mark { font-weight: 700; } .ap-mark.correct { color: #3fb950 !important; } .ap-mark.incorrect { color: #ff7b72 !important; }
       .ap-lock { font-size: 12px; opacity: .7; }
+      .ap-graph { display: inline-block; padding: 6px 10px; border: 1px dashed #2c2c34; border-radius: 8px; color: var(--accent); text-decoration: none; }
+      /* ProblemVault shows its own ✓/✗ next to each box: hide WebAssign's marks and hidden details. */
+      .waMark, .padMark, .waMarkWrap, img[src*="mCorrect"], img[src*="mIncorrect"] { display: none !important; }
+      .questionDetail, .qUtility .preContent { display: none; }
+      table { color: inherit; }
     </style><div class="q qContent">${proxied(q.html)}</div>`;
+  fixInlineColors(root);
   root.querySelectorAll('.ap-tex').forEach(el => {
     el.dataset.tex = el.textContent; // kept for "Use as problem text"
     try { el.innerHTML = ML.convertLatexToMarkup(el.textContent); } catch {}
   });
 
   const fields = {};
+  const mark = (slot, p) => {
+    if (p.mark) slot.insertAdjacentHTML('beforeend', `<span class="ap-mark ${p.mark}" title="${p.mark}">${p.mark === 'correct' ? '✓' : '✗'}</span>`);
+  };
   for (const p of q.parts) {
-    if (p.kind === 'math' || p.kind === 'text') {
+    if (p.kind === 'graph') {
+      // WebAssign's graphing tool cannot run here: answer it on WebAssign.
+      const slot = root.querySelector(`.ap-box[data-name="${p.name}"]`);
+      if (slot) {
+        slot.insertAdjacentHTML('beforeend', `<a class="ap-graph" href="${esc(asg.url)}#${esc(q.box)}" target="_blank" rel="noopener">📈 Graph answer: open in WebAssign</a>`);
+        mark(slot, p);
+      }
+      fields[p.name] = { part: p };
+    } else if (p.kind === 'matrix') {
+      const slot = root.querySelector(`.ap-box[data-name="${p.name}"]`);
+      if (!slot) continue;
+      const m = matrixEditor(store.get(draftKey(dep, p.name)) ?? p.value, p.rows, p.cols, !p.enabled,
+        v => store.set(draftKey(dep, p.name), v));
+      slot.append(m.el);
+      if (!p.enabled) slot.insertAdjacentHTML('beforeend', '<span class="ap-lock">🔒</span>');
+      mark(slot, p);
+      fields[p.name] = { part: p, el: m };
+    } else if (p.kind === 'math' || p.kind === 'text') {
       const slot = root.querySelector(`.ap-box[data-name="${p.name}"]`);
       if (!slot) continue;
       const saved = store.get(draftKey(dep, p.name));
@@ -136,12 +183,37 @@ function buildQuestion(asg, q, body) {
       slot.append(el);
       if (!p.enabled) {
         el.readOnly = true;
+        el.title = 'Locked by WebAssign (already correct or no submissions left)';
         slot.insertAdjacentHTML('beforeend', '<span class="ap-lock">🔒</span>');
+      } else if (p.kind === 'math') {
+        // MathLive bug: after a click on the empty padding of the field, typed characters are dropped.
+        // Handle padding clicks here: focus by code and put the caret at the end.
+        slot.addEventListener('pointerdown', e => {
+          const t = e.composedPath()[0];
+          const cls = typeof t.className === 'string' ? t.className : '';
+          if (t === slot || t === el || /\bML__(container|content)\b/.test(cls)) {
+            e.preventDefault(); e.stopPropagation();
+            el.focus();
+            el.executeCommand?.('moveToMathfieldEnd');
+          }
+        }, true);
       }
-      if (p.mark) slot.insertAdjacentHTML('beforeend', `<span class="ap-mark ${p.mark}">${p.mark === 'correct' ? '✓' : '✗'}</span>`);
+      mark(slot, p);
       fields[p.name] = { part: p, el };
     } else {
       fields[p.name] = { part: p };
+      const saved = store.get(draftKey(dep, p.name));
+      const els = root.querySelectorAll(`[name="${p.name}"]`);
+      if (saved != null) els.forEach(i => {
+        if (i.type === 'radio') i.checked = i.value === saved;
+        else if (i.type === 'checkbox') i.checked = saved.includes(i.value);
+        else i.value = saved;
+      });
+      els.forEach(i => i.addEventListener('change', () => store.set(draftKey(dep, p.name), readChoice(root, p))));
+      // WebAssign's own marks are hidden: show ✓/✗ after the last option (or the drop-down)
+      const last = els[els.length - 1];
+      if (last && p.mark) (last.closest('label, .ms') || last).insertAdjacentHTML('afterend',
+        ` <span class="ap-mark ${p.mark}" title="${p.mark}">${p.mark === 'correct' ? '✓' : '✗'}</span>`);
     }
   }
 
@@ -188,6 +260,55 @@ async function showExtension(dep, el) {
   };
 }
 
+// WebAssign writes black text inline (style="color:black", <font color>). Use the theme text
+// colour for black, white and grey; keep real colours (red, blue hints).
+const colorCtx = document.createElement('canvas').getContext('2d');
+function fixInlineColors(root) {
+  root.querySelectorAll('[style*="color"], font[color]').forEach(el => {
+    const v = el.style.color || el.getAttribute('color');
+    if (!v) return;
+    colorCtx.fillStyle = '#123456'; colorCtx.fillStyle = v;
+    const m = /^#(..)(..)(..)$/.exec(colorCtx.fillStyle);
+    if (!m) return;
+    const [r, g, b] = m.slice(1).map(h => parseInt(h, 16));
+    if (Math.max(r, g, b) - Math.min(r, g, b) < 40) { el.style.color = ''; el.removeAttribute('color'); }
+  });
+}
+
+// WebAssign matrix answer: "[a,b;c,d]" (',' between columns, ';' between rows), "" when empty.
+function matrixEditor(value, rows, cols, readonly, onChange) {
+  const esc = ctx.esc;
+  let cells = String(value || '').replace(/[\[\]\s]/g, '')
+    ? String(value).replace(/[\[\]]/g, '').split(';').map(r => r.split(',').map(c => c.trim())) : [];
+  rows = cells.length || rows || 2; cols = Math.max(0, ...cells.map(r => r.length)) || cols || 2;
+  const el = document.createElement('span');
+  el.className = 'ap-matrix';
+  const read = () => [...el.querySelectorAll('tr')].map(tr => [...tr.querySelectorAll('input')].map(i => i.value));
+  const value_ = () => {
+    const c = read();
+    return c.flat().some(v => /\w/.test(v)) ? '[' + c.map(r => r.map(v => v.replace(/[,;\[\]]/g, '').trim()).join(',')).join(';') + ']' : '';
+  };
+  const draw = () => {
+    el.innerHTML = `<table class="ap-mx">${Array.from({ length: rows }, (_, r) => `<tr>${Array.from({ length: cols }, (_, c) =>
+      `<td><input class="ap-text ap-cell" inputmode="decimal" aria-label="row ${r + 1} column ${c + 1}"
+        value="${esc(cells[r]?.[c] ?? '')}" ${readonly ? 'readonly' : ''}></td>`).join('')}</tr>`).join('')}</table>
+      ${readonly ? '' : `<span class="ap-mx-btns">
+        <button type="button" data-d="0,1" title="Add row">+row</button><button type="button" data-d="0,-1" title="Remove row">−row</button>
+        <button type="button" data-d="1,0" title="Add column">+col</button><button type="button" data-d="-1,0" title="Remove column">−col</button></span>`}`;
+  };
+  draw();
+  el.addEventListener('input', () => onChange(value_()));
+  el.addEventListener('click', e => {
+    const b = e.target.closest('button[data-d]');
+    if (!b) return;
+    const [dc, dr] = b.dataset.d.split(',').map(Number);
+    cells = read();
+    rows = Math.max(1, rows + dr); cols = Math.max(1, cols + dc);
+    draw(); onChange(value_());
+  });
+  return { el, get value() { return value_(); } };
+}
+
 function readChoice(root, p) {
   const els = [...root.querySelectorAll(`[name="${p.name}"]`)];
   if (p.kind === 'radio') return els.find(i => i.checked)?.value ?? null;
@@ -205,7 +326,7 @@ async function send(asg, q, root, fields, btn) {
     if (f.part.kind === 'math') {
       const latex = f.el.value.trim();
       answers[name] = latex ? latexToMathml(latex) : '';
-    } else if (f.part.kind === 'text') answers[name] = f.el.value;
+    } else if (f.part.kind === 'text' || f.part.kind === 'matrix') answers[name] = f.el.value;
     else { const v = readChoice(root, f.part); if (v != null) answers[name] = v; }
   }
   if (action === 'submit' && !confirm(`Submit question ${q.number} to WebAssign?`)) return;

@@ -9,6 +9,7 @@ import base64
 import datetime
 import json
 import math
+import re
 import threading
 import time
 
@@ -80,7 +81,7 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"workspace": WS, "lines": {"type": "array", "items": {"type": "object"}}}, "required": ["workspace", "lines"]}},
 ]
 
-_SUBMIT_TOOL = {"name": "webassign_submit", "description": "Type the student's circled final answers into the linked WebAssign question and submit it. ONLY when the student pressed Submit in ProblemVault (otherwise it is refused), and only after you checked that their work is right and each answer is circled. Answers exactly as the student wrote them (same digits, rounding and sign; no units). Math boxes take LaTeX, e.g. {\"RA_1_1\": \"7.2\"}. Box names come from webassign_read. Returns which answers WebAssign marked correct.",
+_SUBMIT_TOOL = {"name": "webassign_submit", "description": "Type the student's circled final answers into the linked WebAssign question and submit it. ONLY when the student pressed Submit in ProblemVault (otherwise it is refused), and only after you checked that their work is right and each answer is circled. Answers exactly as the student wrote them (same digits, rounding and sign; no units). Math boxes take LaTeX, e.g. {\"RA_1_1\": \"7.2\"}; matrix boxes take \"[a,b;c,d]\" (',' between columns, ';' between rows); multiple-choice and drop-down boxes take the option value from webassign_read, select-all (checkbox) boxes a list of values. Graph boxes cannot be filled. Box names come from webassign_read. Returns which answers WebAssign marked correct.",
                 "inputSchema": {"type": "object", "properties": {"workspace": WS, "answers": {"type": "object", "description": "box name -> answer (LaTeX for math boxes)"}}, "required": ["workspace", "answers"]}}
 TOOLS.append(_SUBMIT_TOOL)
 
@@ -591,6 +592,44 @@ def t_webassign_read(args):
     return content
 
 
+def matrix_value(v):
+    """A matrix answer in WebAssign's form "[a,b;c,d]", from that form, rows as lists, or a LaTeX matrix."""
+    if isinstance(v, list):
+        rows = [r if isinstance(r, list) else [r] for r in v]
+    else:
+        s = str(v).strip().strip("$")
+        m = re.search(r"\\begin\{[a-zA-Z]*matrix\*?\}(.*?)\\end\{[a-zA-Z]*matrix\*?\}", s, re.S)
+        if m:
+            rows = [r.split("&") for r in re.split(r"\\\\", m.group(1)) if r.strip()]
+        elif s.startswith("[") and s.endswith("]"):
+            rows = [r.split(",") for r in s[1:-1].split(";")]
+        else:
+            raise ValueError("matrix answer must look like [a,b;c,d] (',' between columns, ';' between rows)")
+    rows = [[str(c).strip().replace(r"\frac", "").replace("{", "(").replace("}", ")").replace(")(", ")/(")
+             for c in r] for r in rows]
+    rows = [[c[1:-1] if re.fullmatch(r"\(\d+\)", c) else c for c in r] for r in rows]
+    if not rows or len({len(r) for r in rows}) != 1 or any(not c for r in rows for c in r):
+        raise ValueError("every matrix row needs the same number of entries, none empty")
+    return "[" + ";".join(",".join(r) for r in rows) + "]"
+
+
+def choice_value(v, opts, kind):
+    """Option value(s) for a choice box, from option values (or exact option labels)."""
+    want = v if isinstance(v, list) else [v]
+    if kind != "checkbox" and len(want) != 1:
+        raise ValueError("pick exactly one option")
+    out = []
+    for x in want:
+        x = str(x).strip()
+        hit = next((o[0] for o in opts if o[0] == x), None)
+        if hit is None:
+            hit = next((o[0] for o in opts if o[1] and o[1].lower() == x.lower()), None)
+        if hit is None or hit == "":  # "" is a drop-down's "--Select--"
+            raise ValueError(f"no option {x!r}; options: " + "; ".join(f"{o[0]} = {o[1] or '(image/math)'}" for o in opts))
+        out.append(hit)
+    return out if kind == "checkbox" else out[0]
+
+
 def t_webassign_submit(args):
     w = _ws(args)
     if not w.get("wa"):
@@ -603,15 +642,24 @@ def t_webassign_submit(args):
     except webassign.WebAssignError as e:
         raise ToolError(str(e)) from None
     parts = {p["name"]: p for p in q.get("parts", [])}
-    bad = [n for n in given if n not in parts or parts[n]["kind"] not in ("math", "text") or not parts[n].get("enabled", True)]
+    kinds = ("math", "text", "matrix", "radio", "checkbox", "select")
+    bad = [n for n in given if n not in parts or parts[n]["kind"] not in kinds or not parts[n].get("enabled", True)]
     if bad:
-        raise ToolError(f"Can't fill {', '.join(bad)}: only open math/text boxes of this question ({', '.join(parts)}). "
-                        "Tell the student to answer choice boxes themselves.")
-    if not _take_permit(w["id"]):
-        raise ToolError("Not allowed: the student did not press Submit in ProblemVault (or it expired). Tell them their answers instead.")
+        raise ToolError(f"Can't fill {', '.join(bad)}: only open answer boxes of this question ({', '.join(parts)}); "
+                        "graph boxes are answered on WebAssign by the student.")
+    options = webassign.choice_options(q)
     answers = {n: p["value"] for n, p in parts.items() if p.get("enabled", True) and p.get("value") is not None}
     for n, v in given.items():
-        answers[n] = latex_to_mathml(str(v)) if parts[n]["kind"] == "math" else str(v)
+        kind = parts[n]["kind"]
+        try:
+            if kind in ("radio", "checkbox", "select"):
+                answers[n] = choice_value(v, options.get(n, []), kind)
+            else:
+                answers[n] = latex_to_mathml(str(v)) if kind == "math" else matrix_value(v) if kind == "matrix" else str(v)
+        except ValueError as e:
+            raise ToolError(f"{n}: {e}") from None
+    if not _take_permit(w["id"]):  # after the checks: a bad answer does not use up the student's press
+        raise ToolError("Not allowed: the student did not press Submit in ProblemVault (or it expired). Tell them their answers instead.")
     try:
         a = webassign.submit(w["wa"]["dep"], w["wa"]["box"], answers, "submit")
     except webassign.WebAssignError as e:
