@@ -1053,6 +1053,31 @@ async function loadPdfjs() {
   return pdfjsLib;
 }
 
+// PDF pages as base64 PNGs (equation sheets, for the AI to read).
+export async function pdfToPngs(file, maxPages = 10, width = 1400) {
+  const lib = await loadPdfjs();
+  const doc = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  if (doc.numPages > maxPages) { doc.destroy(); throw new Error(`An equation sheet can have at most ${maxPages} pages. This PDF has ${doc.numPages}.`); }
+  const out = [];
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i);
+    const vp = page.getViewport({ scale: width / page.getViewport({ scale: 1 }).width });
+    const cv = document.createElement('canvas');
+    cv.width = Math.round(vp.width);
+    cv.height = Math.round(vp.height);
+    const cx = cv.getContext('2d');
+    cx.fillStyle = '#fff';
+    cx.fillRect(0, 0, cv.width, cv.height);
+    await page.render({ canvasContext: cx, viewport: vp }).promise;
+    const blob = await new Promise(r => cv.toBlob(r, 'image/png'));
+    out.push(await b64(await blob.arrayBuffer()));
+  }
+  doc.destroy();
+  return out;
+}
+
+export const fileToBase64 = async file => b64(await file.arrayBuffer());
+
 const isPdf = f => f && (f.type === 'application/pdf' || /\.pdf$/i.test(f.name || ''));
 
 export function insertFile(file) {

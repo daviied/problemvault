@@ -276,6 +276,11 @@ class Handler(BaseHTTPRequestHandler):
                 ask.set_mode(self.json_body().get("mode"))
                 events.publish("index", {"type": "settings"})
             return self.send(200, ask.ai_status())
+        if head == "prompts" and parts[1:] == [] and method in ("GET", "PUT"):  # global AI prompt
+            if method == "PUT":
+                b = self.json_body()
+                ask.set_prompts(b.get("system"), b.get("tools"), b.get("presets"))
+            return self.send(200, ask.prompts())
         if head == "gemini":  # Gemini backup: API key, test
             if parts[1:] == ["key"] and method == "POST":
                 gemini.set_key(str(self.json_body().get("key", ""))[:500])
@@ -359,7 +364,41 @@ class Handler(BaseHTTPRequestHandler):
             "mcp": {"url": f"{self.public_origin()}/mcp", "token": MCP_TOKEN},
         }
 
+    def folder_sheet(self, method, fid, rest):
+        """Equation sheet for a folder. The browser renders the PDF to PNG pages for the AI."""
+        if not any(f["id"] == fid for f in store.index()["folders"]):
+            raise HttpError(404, "No such folder")
+        if method == "GET" and rest == ["info"]:
+            at, meta = store.sheet_for_folder(fid)
+            return self.send(200, {"sheet": meta and {"name": meta["name"], "pages": meta["pages"], "read": bool(meta.get("text"))},
+                                   "from": at, "own": at == fid})
+        if method == "GET" and not rest:
+            if not store.get_sheet(fid):
+                raise HttpError(404, "No equation sheet")
+            with open(store.sheet_path(fid, "sheet.pdf"), "rb") as f:
+                return self.send(200, f.read(), "application/pdf", {"Cache-Control": "no-cache"})
+        if method == "PUT" and not rest:
+            b = self.json_body()
+            try:
+                pdf = base64.b64decode(b.get("pdf") or "", validate=True)
+                pngs = [base64.b64decode(p, validate=True) for p in (b.get("pages") or [])]
+            except (ValueError, TypeError):
+                raise HttpError(400, "Bad file data") from None
+            if not pdf.startswith(b"%PDF-"):
+                raise HttpError(400, "That is not a PDF")
+            if not 1 <= len(pngs) <= 10 or not all(p.startswith(b"\x89PNG") for p in pngs):
+                raise HttpError(400, "An equation sheet can have 1 to 10 pages")
+            store.save_sheet(fid, b.get("name"), pdf, pngs)
+        elif method == "DELETE" and not rest:
+            store.delete_sheet(fid)
+        else:
+            raise HttpError(405, "Method not allowed")
+        events.publish("index", {"type": "index"})
+        return self.send(200, {"ok": True})
+
     def folders(self, method, rest):
+        if len(rest) >= 2 and rest[1] == "sheet":
+            return self.folder_sheet(method, rest[0], rest[2:])
         if method == "POST" and not rest:
             b = self.json_body()
             f = store.create_folder(b.get("name"), b.get("parent"))

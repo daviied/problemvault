@@ -83,6 +83,7 @@
         <div id="quick" class="quick">
           <button class="text" data-preset="check" title="Claude checks your work and marks corrections on the page">Check with Claude</button>
           <button class="text" data-preset="next" title="Claude checks your work, then gives the next step or helps you fix a mistake">Next step</button>
+          <button class="text" data-preset="equations" title="Claude writes the equations for this problem on the page, without numbers or an answer">Equations</button>
           <button class="text" data-preset="calc" title="Claude checks your math; if it is right, Claude puts your givens and equations into the linked CalcVault calculator">Update Calc</button>
           <button class="text submit" data-preset="submit" hidden title="Claude checks your work; if it is right and your answers are circled, Claude types them into WebAssign and submits">Submit</button>
         </div>
@@ -137,6 +138,8 @@
                 <label><input type="radio" name="ai-mode" value="gemini"> Gemini</label>
                 <span id="ai-note" class="muted small"></span>
               </div>
+              <button type="button" id="eq-btn" class="subtle prompt-edit" title="Claude writes the equations for this problem on the page, without numbers or an answer">Relevant equations</button>
+              <button type="button" id="prompt-edit" class="subtle prompt-edit">Edit AI prompt</button>
             </form>
             <div id="manual" hidden>
               <p>Paste this into Claude (Desktop, claude.ai or Claude Code) with the ProblemVault connector on:</p>
@@ -260,6 +263,41 @@
     <span id="gem-msg" class="muted small"></span>
   </div>
   <form method="dialog"><button class="primary">Close</button></form>
+</dialog>
+
+<dialog id="sheet">
+  <h2>Equation sheet: <span id="sheet-folder"></span></h2>
+  <p id="sheet-info"></p>
+  <p class="small muted">Relevant equations takes its equations from this sheet, for the problems in this folder and its subfolders. A subfolder can have its own sheet.</p>
+  <div class="token-row">
+    <button type="button" id="sheet-upload" class="primary">Upload PDF</button>
+    <a id="sheet-open" class="small" target="_blank" rel="noopener">Open</a>
+    <button type="button" id="sheet-remove" class="subtle">Remove</button>
+    <span id="sheet-msg" class="muted small"></span>
+  </div>
+  <input type="file" id="sheet-file" accept="application/pdf,.pdf" hidden>
+  <form method="dialog"><button class="primary">Close</button></form>
+</dialog>
+
+<dialog id="prompts">
+  <h2>AI prompt</h2>
+  <label for="prompt-system"><strong>Global prompt</strong></label>
+  <p class="small muted">Sent with every question you ask in this app, to Claude and Gemini.</p>
+  <textarea id="prompt-system" class="prompt-text" rows="8" maxlength="20000"></textarea>
+  <label for="prompt-tools"><strong>Tool guide</strong></label>
+  <p class="small muted">Tells the AI how to read your page and use its tools. Connected Claude apps also get it, the next time they connect.</p>
+  <textarea id="prompt-tools" class="prompt-text" rows="8" maxlength="20000"></textarea>
+  <h3>Button prompts</h3>
+  <p class="small muted">What each one-tap button asks. The Submit rules are here: if you change them, you change when the AI submits to WebAssign.</p>
+  <div id="prompt-presets"></div>
+  <div class="token-row">
+    <button type="button" id="prompt-reset" class="subtle">Reset to default</button>
+    <span id="prompt-msg" class="muted small"></span>
+  </div>
+  <form method="dialog">
+    <button class="subtle">Close</button>
+    <button type="button" id="prompt-save" class="primary">Save</button>
+  </form>
 </dialog>
 
 <dialog id="preview">

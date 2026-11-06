@@ -12,6 +12,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import threading
 import time
 
@@ -155,7 +156,89 @@ def delete_folder(fid):
                 w["folder"] = f["parent"]
         ix["folders"] = [x for x in ix["folders"] if x["id"] != fid]
         _save_index(ix)
+        shutil.rmtree(_sheet_dir(fid), ignore_errors=True)
         return True
+
+
+# ---------------------------------------------------------------------------
+# Equation sheets: one per folder, used by the problems in it and its subfolders.
+# Kept in DATA_DIR only (they are course material; never in the repo).
+#   sheets/<folder>/sheet.pdf, page1.png..., meta.json {name, pages, text}
+# ---------------------------------------------------------------------------
+
+def _sheet_dir(fid):
+    if not ID_RE.match(str(fid or "")):
+        raise ValueError("Bad folder id")
+    return os.path.join(DATA_DIR, "sheets", fid)
+
+
+def get_sheet(fid):
+    return _read(os.path.join(_sheet_dir(fid), "meta.json"), None)
+
+
+def sheet_path(fid, filename):
+    return os.path.join(_sheet_dir(fid), filename)
+
+
+def _mark_sheet(fid, name):
+    ix = index()
+    f = next((f for f in ix["folders"] if f["id"] == fid), None)
+    if not f:
+        return False
+    if name:
+        f["sheet"] = name
+    else:
+        f.pop("sheet", None)
+    _save_index(ix)
+    return True
+
+
+def save_sheet(fid, name, pdf, pngs):
+    """Replaces the folder's sheet (and forgets what the AI read from the old one)."""
+    with _lock:
+        name = _clean_name(name, "Equation sheet")
+        if not _mark_sheet(fid, name):
+            return None
+        d = _sheet_dir(fid)
+        shutil.rmtree(d, ignore_errors=True)
+        os.makedirs(d)
+        with open(os.path.join(d, "sheet.pdf"), "wb") as f:
+            f.write(pdf)
+        for i, png in enumerate(pngs, 1):
+            with open(os.path.join(d, f"page{i}.png"), "wb") as f:
+                f.write(png)
+        meta = {"name": name, "pages": len(pngs), "text": ""}
+        _write(os.path.join(d, "meta.json"), meta)
+        return meta
+
+
+def set_sheet_text(fid, text):
+    with _lock:
+        meta = get_sheet(fid)
+        if meta:
+            meta["text"] = str(text)[:40000]
+            _write(os.path.join(_sheet_dir(fid), "meta.json"), meta)
+        return meta
+
+
+def delete_sheet(fid):
+    with _lock:
+        shutil.rmtree(_sheet_dir(fid), ignore_errors=True)
+        return _mark_sheet(fid, None)
+
+
+def sheet_for_folder(fid):
+    """The nearest sheet going up from a folder: (folder id, meta), or (None, None)."""
+    folders = {f["id"]: f for f in index()["folders"]}
+    seen = set()
+    while fid and fid in folders and fid not in seen:
+        seen.add(fid)
+        if folders[fid].get("sheet"):
+            meta = get_sheet(fid)
+            if meta:
+                return fid, meta
+        fid = folders[fid].get("parent")
+    return None, None
 
 
 def folder_path(ix, fid):

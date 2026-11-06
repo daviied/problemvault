@@ -34,6 +34,12 @@ When the inkvault_* tools are listed, the student's class notes are there: inkva
 method or formula the class used, then inkvault_read the best note. Help them learn: point at the step that's wrong, don't just hand
 over answers unless asked."""
 
+
+def ask_tools_prompt():
+    from .ask import tools_prompt  # ask imports this module too
+    return tools_prompt()
+
+
 S = {"type": "string"}
 WS = {"type": "string", "description": "Workspace id (or its exact title)"}
 
@@ -55,6 +61,10 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"workspace": WS, "block": S, "blocks": {"type": "array", "items": S, "description": "Several block ids that one text covers (e.g. a grouped view)"}, "text": S}, "required": ["workspace", "text"]}},
     {"name": "describe_image", "description": "Store a description of a pasted image (circuit topology with component values, the printed equation as LaTeX, figure contents) so it never needs viewing again.",
      "inputSchema": {"type": "object", "properties": {"workspace": WS, "image": S, "text": S}, "required": ["workspace", "image", "text"]}},
+    {"name": "equation_sheet", "description": "The equation sheet the student uploaded for this problem's class folder, if any. Returns your saved LaTeX copy, or page images the first time. Use it when asked for equations, or to derive an equation from the sheet when asked.",
+     "inputSchema": {"type": "object", "properties": {"workspace": WS}, "required": ["workspace"]}},
+    {"name": "save_equation_sheet", "description": "Store the full equation sheet as LaTeX, in its order and with its headings, after equation_sheet showed you the page images. Next time equation_sheet returns this text instead of the images.",
+     "inputSchema": {"type": "object", "properties": {"workspace": WS, "text": S}, "required": ["workspace", "text"]}},
     {"name": "post_note", "description": "Show a note to the student beside their work (Markdown with $inline$ / $$block$$ LaTeX). Use answers=<question id> when replying to a question they asked.",
      "inputSchema": {"type": "object", "properties": {"workspace": WS, "markdown": S, "answers": S}, "required": ["workspace", "markdown"]}},
     {"name": "write", "description": "Type on the student's page, live, in Claude's colour: a hint, a corrected step, a label. Markdown with $LaTeX$. It never covers the student's writing (moved to the nearest free spot if needed). Place it with near_block (put beside/under that block of their writing) or x/y in page units (page is 1000 wide; view_ink captions give box coords: page_x = box_x0 + pixel_x / scale). With neither, it goes below everything. Returns the mark id.",
@@ -216,13 +226,16 @@ def t_get_workspace(args):
     out.append(f"\nPage: 1000 wide, {round(page['height'])} tall; content ends near y{round(_content_bottom(page))}.")
     if w.get("wa"):
         out.append(f"\nWebAssign: {w['wa']['name']} question {w['wa']['number']} — webassign_read for the question and answer status")
+    _, sheet = store.sheet_for_folder(w.get("folder"))
+    if sheet:
+        out.append(f"\nEquation sheet: {sheet['name']} — equation_sheet to read it")
     if w.get("calc"):
         out.append(f"\nCalcVault calculator: {w['calc']['name']} (id {w['calc']['id']}) — calcvault_read for its lines")
     open_q = [q for q in c["questions"] if not q.get("answered")]
     if open_q:
         out.append("\nOpen questions from the student (answer with post_note answers=<id>):")
-        from .ask import PRESETS  # a one-tap request carries its full instructions
-        out += [f"- {q['id']}: {PRESETS[q['preset']][1] if q.get('preset') in PRESETS else q['text']}" for q in open_q]
+        from .ask import question_text  # a one-tap request carries its full instructions
+        out += [f"- {q['id']}: {question_text(q)}" for q in open_q]
     if c["notes"]:
         out.append(f"\nYour last note ({_ago(c['notes'][-1]['at'])}):\n{c['notes'][-1]['md'][:600]}")
     return "\n".join(out)
@@ -320,6 +333,31 @@ def t_save_transcription(args):
     store.update_claude(wid, fn)
     events.publish(wid, {"type": "claude"})
     return f"Saved transcription for {', '.join(b['id'] for b in found)}."
+
+
+def t_equation_sheet(args):
+    w = _ws(args)
+    fid, sheet = store.sheet_for_folder(w.get("folder"))
+    if not sheet:
+        return "No equation sheet for this problem. Do not mention a sheet."
+    if sheet.get("text"):
+        return f"Equation sheet: {sheet['name']}\n\n{sheet['text']}"
+    content = [{"type": "text", "text": f"Equation sheet: {sheet['name']}. Read every equation, then call save_equation_sheet with all of them as LaTeX so nobody pays to read the images again."}]
+    for i in range(1, sheet["pages"] + 1):
+        with open(store.sheet_path(fid, f"page{i}.png"), "rb") as f:
+            content.append({"type": "image", "data": base64.b64encode(f.read()).decode(), "mimeType": "image/png"})
+    return content
+
+
+def t_save_equation_sheet(args):
+    w = _ws(args)
+    fid, sheet = store.sheet_for_folder(w.get("folder"))
+    if not sheet:
+        raise ToolError("This problem has no equation sheet.")
+    if not str(args.get("text") or "").strip():
+        raise ToolError("text is empty.")
+    store.set_sheet_text(fid, args["text"])
+    return "Saved."
 
 
 def t_describe_image(args):
@@ -752,7 +790,7 @@ def handle(msg):
             result = {"protocolVersion": client_ver if client_ver <= PROTOCOL else PROTOCOL,
                       "capabilities": {"tools": {"listChanged": False}},
                       "serverInfo": {"name": "problemvault", "version": "0.1.0"},
-                      "instructions": INSTRUCTIONS}
+                      "instructions": ask_tools_prompt()}
         elif method == "ping":
             result = {}
         elif method == "tools/list":

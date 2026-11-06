@@ -34,11 +34,52 @@ _lock = threading.Lock()
 
 SYSTEM = (
     "You are helping a student with homework inside ProblemVault. The student asked a question about "
-    "workspace {wid}. Use get_workspace first, view_ink only for ink/images not read yet, and save what "
+    "the workspace named in their message. Use get_workspace first, view_ink only for ink/images not read yet, and save what "
     "you read (save_transcription / describe_image). If a mark on their page helps (write / draw), add it. "
     "Then reply to the student. Your final message is shown to them as Markdown with $LaTeX$; keep it "
     "focused, and help them learn rather than only giving the answer, unless they ask for the answer."
 )
+
+
+PROMPT_MAX = 20000
+
+
+def system_prompt():
+    """The global prompt for every in-app question (student's version, or the default)."""
+    return store.get_settings().get("prompt_system") or SYSTEM
+
+
+def tools_prompt():
+    """The tool guide: in-app questions and connected Claude apps both get it."""
+    from .mcp import INSTRUCTIONS
+    return store.get_settings().get("prompt_tools") or INSTRUCTIONS
+
+
+def prompts():
+    from .mcp import INSTRUCTIONS
+    return {"system": system_prompt(), "tools": tools_prompt(),
+            "presets": {k: preset_prompt(k) for k in PRESETS},
+            "labels": {k: v[0] for k, v in PRESETS.items()},
+            "defaults": {"system": SYSTEM, "tools": INSTRUCTIONS, "presets": {k: v[1] for k, v in PRESETS.items()}}}
+
+
+def preset_prompt(key):
+    """What a one-tap button sends (student's version, or the default)."""
+    return (store.get_settings().get("prompt_presets") or {}).get(key) or PRESETS[key][1]
+
+
+def question_text(q):
+    return preset_prompt(q["preset"]) if q.get("preset") in PRESETS else q["text"]
+
+
+def set_prompts(system, tools, presets=None):
+    """Empty text, or the default text, means "use the default" (so later updates reach it)."""
+    d = prompts()["defaults"]
+    clean = lambda v, default: "" if str(v or "").strip() == default.strip() else str(v or "").strip()[:PROMPT_MAX]
+    presets = presets if isinstance(presets, dict) else {}
+    saved = {k: clean(presets.get(k), v) for k, v in d["presets"].items()}
+    store.update_settings({"prompt_system": clean(system, d["system"]), "prompt_tools": clean(tools, d["tools"]),
+                           "prompt_presets": {k: v for k, v in saved.items() if v}})
 
 
 # one-tap requests from the tablet: label shown in the app, prompt sent to Claude
@@ -56,6 +97,20 @@ PRESETS = {
              "give the next step yet. If everything so far is right: write ONLY the next step (one step, not "
              "the whole solution) on the page below my last line, as a hint I can follow. Never place text over "
              "my writing. Reply with a 1-2 line summary."),
+    "equations": ("Relevant equations",
+                  "List the equations relevant to this problem. First read the problem: the typed text, image "
+                  "descriptions and any image not read yet (use webassign_read if linked; if the inkvault_* tools are "
+                  "listed, search my class notes for the method and formulas my class used). Then call equation_sheet. "
+                  "If there is no sheet, choose the equations yourself and do not mention a sheet. If there is a sheet, "
+                  "take the equations from it, written the way the sheet writes them. If the problem needs an equation "
+                  "that is not on the sheet: when it can be derived from equations on the sheet, list those sheet "
+                  "equations first, then add the line '⚠ Not on your sheet: <name>. It can be derived from the equations "
+                  "above. Ask me if you want it.' and do NOT write the derived equation; when it cannot be derived, add "
+                  "the line '⚠ Not on your sheet: <name>: <equation>'. Then call write ONCE, with no near_block and no "
+                  "x/y so it goes below everything: a short list in $LaTeX$, each equation with its name, and what a "
+                  "symbol means only if it is not clear. Give the general equations only: do NOT put in the numbers, "
+                  "solve, show steps, give an answer or check my work. Reply with one line that says you added them and "
+                  "how many flags there are, if any."),
     "calc": ("Update CalcVault from my work",
              "I pressed Update Calc. Read my math on this page (any ink you have not read yet) and check every given "
              "and equation, step by step. Then call calcvault_read to see what the linked calculator already has. "
@@ -249,7 +304,7 @@ def manual_prompt(w, q):
 
 def run(w, q, port, token):
     """Background: run claude -p (or Gemini) and post its answer as a note."""
-    from .mcp import INSTRUCTIONS, post_note
+    from .mcp import post_note
     wid = w["id"]
     with _lock:
         if wid in _running:
@@ -262,7 +317,7 @@ def run(w, q, port, token):
                                                 "headers": {"Authorization": f"Bearer {token}"}}}}
         with open(cfg_path, "w", encoding="utf-8") as f:
             json.dump(cfg, f)
-        prompt = f"Workspace {wid}, question {q['id']}: {PRESETS[q['preset']][1] if q.get('preset') in PRESETS else q['text']}"
+        prompt = f"Workspace {wid}, question {q['id']}: {question_text(q)}"
         who = provider()
         try:
             answer = None
@@ -271,7 +326,7 @@ def run(w, q, port, token):
                 p = subprocess.run(
                     [CLI, "-p", "--output-format", "text", "--mcp-config", cfg_path, "--strict-mcp-config",
                      "--allowedTools", "mcp__problemvault", "--disallowedTools", "mcp__problemvault__post_note",
-                     "--append-system-prompt", SYSTEM.format(wid=wid)],
+                     "--append-system-prompt", system_prompt()],
                     input=prompt, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600,
                     cwd=store.DATA_DIR, env=_env(),
                 )
@@ -286,7 +341,7 @@ def run(w, q, port, token):
                     answer, who = None, "gemini"  # auto: Gemini answers this one
             if who == "gemini":
                 events.publish(wid, {"type": "ask", "state": "running", "question": q["id"], "by": "gemini"})
-                answer = gemini.run(SYSTEM.format(wid=wid) + "\n\n" + INSTRUCTIONS, prompt)
+                answer = gemini.run(system_prompt() + "\n\n" + tools_prompt(), prompt)
             if answer is None:
                 raise RuntimeError("No AI is set up.")
             post_note(wid, answer, q["id"], by=who)

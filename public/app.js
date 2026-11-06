@@ -304,12 +304,21 @@ function renderTree() {
     el.draggable = true;
     el.innerHTML = `<span class="caret">▶</span><span class="name"></span><span class="acts">
       <button data-a="ws" title="New problem here">+</button><button data-a="sub" title="New subfolder">⊞</button>
-      <button data-a="ren" title="Rename">✎</button><button data-a="del" title="Delete folder">×</button></span>`;
+      <button data-a="sheet" title="Equation sheet">∑</button><button data-a="ren" title="Rename">✎</button><button data-a="del" title="Delete folder">×</button></span>`;
     el.querySelector('.name').textContent = f.name;
+    if (f.sheet) {
+      const mark = document.createElement('span');
+      mark.className = 'sheet-mark';
+      mark.dataset.a = 'sheet';
+      mark.title = `Equation sheet: ${f.sheet}`;
+      mark.textContent = '∑';
+      el.querySelector('.name').after(mark);
+    }
     el.onclick = e => {
       const a = e.target.dataset?.a;
       if (a === 'ws') return newWorkspace(f.id);
       if (a === 'sub') return newFolder(f.id);
+      if (a === 'sheet') return openSheet(f);
       if (a === 'ren') return renameFolder(f);
       if (a === 'del') return deleteFolder(f);
       open ? openFolders.delete(f.id) : openFolders.add(f.id);
@@ -534,7 +543,7 @@ $('#ask').onsubmit = async e => {
 };
 // Tablet: "Check with Claude" and "Next step" send a ready-made request (text is on the server)
 function setQuickBusy(busy) {
-  document.querySelectorAll('#quick button, #calc-update').forEach(b => { b.disabled = busy; });
+  document.querySelectorAll('#quick button, #calc-update, #eq-btn').forEach(b => { b.disabled = busy; });
 }
 document.querySelectorAll('#quick button').forEach(b => b.addEventListener('click', async () => {
   if (!ws) return toast('Open a problem first');
@@ -545,7 +554,7 @@ document.querySelectorAll('#quick button').forEach(b => b.addEventListener('clic
     if (r.mode === 'cli') {
       setQuickBusy(true);
       $('#ask-state').textContent = `${aiName(r.by)} is working on it…`;
-      toast({ check: 'Claude is checking your work…', next: 'Claude is looking at your work…', submit: 'Claude is checking before it submits…', calc: 'Claude is checking your math for CalcVault…' }[b.dataset.preset], 2500);
+      toast({ check: 'Claude is checking your work…', next: 'Claude is looking at your work…', submit: 'Claude is checking before it submits…', calc: 'Claude is checking your math for CalcVault…', equations: 'Claude is finding the equations…' }[b.dataset.preset], 2500);
     } else {
       copy(r.prompt);
       toast('Copied: paste it into Claude (ProblemVault connector on)', 3500);
@@ -694,6 +703,7 @@ $('#calc-new-name').addEventListener('keydown', e => { if (e.key === 'Enter') $(
 $('#calc-change').onclick = () => { calcPicking = true; renderCalc(); };
 $('#calc-cancel').onclick = () => { calcPicking = false; renderCalc(); };
 $('#calc-unlink').onclick = () => call('DELETE', `/api/ws/${ws.meta.id}/calc`);
+$('#eq-btn').onclick = () => document.querySelector('#quick [data-preset=equations]').click();
 $('#calc-update').onclick = () => document.querySelector('#quick [data-preset=calc]').click();
 $('#calc-refresh').onclick = () => renderCalc();
 
@@ -722,6 +732,81 @@ $('#connect-btn').onclick = () => {
   $('#cli-msg').textContent = '';
   $('#gem-msg').textContent = '';
   $('#connect').showModal();
+};
+
+let sheetFolder = null;
+async function showSheet() {
+  const f = sheetFolder;
+  const r = await call('GET', `/api/folders/${f.id}/sheet/info`);
+  $('#sheet-folder').textContent = f.name;
+  $('#sheet-info').textContent = !r.sheet ? 'No sheet yet.'
+    : r.own ? `${r.sheet.name} (${r.sheet.pages} page${r.sheet.pages > 1 ? 's' : ''}).`
+      : `Using ${r.sheet.name} from a parent folder. Upload a sheet to use a different one here.`;
+  $('#sheet-open').hidden = !r.sheet;
+  if (r.sheet) $('#sheet-open').href = `/api/folders/${r.from}/sheet`;
+  $('#sheet-remove').hidden = !r.own;
+}
+async function openSheet(f) {
+  sheetFolder = f;
+  $('#sheet-msg').textContent = '';
+  await showSheet();
+  $('#sheet').showModal();
+}
+$('#sheet-upload').onclick = () => $('#sheet-file').click();
+$('#sheet-file').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    $('#sheet-msg').textContent = 'Uploading…';
+    const pages = await board.pdfToPngs(file);
+    await call('PUT', `/api/folders/${sheetFolder.id}/sheet`, { name: file.name, pdf: await board.fileToBase64(file), pages });
+    $('#sheet-msg').textContent = 'Saved.';
+    await showSheet();
+    loadState();
+  } catch (err) {
+    $('#sheet-msg').textContent = /password/i.test(err?.name || err?.message || '') ? 'That PDF has a password. Remove it first.' : err.message;
+  }
+});
+$('#sheet-remove').onclick = async () => {
+  await call('DELETE', `/api/folders/${sheetFolder.id}/sheet`);
+  $('#sheet-msg').textContent = 'Removed.';
+  await showSheet();
+  loadState();
+};
+
+let promptDefaults = null;
+$('#prompt-edit').onclick = async () => {
+  const p = await call('GET', '/api/prompts');
+  promptDefaults = p.defaults;
+  $('#prompt-system').value = p.system;
+  $('#prompt-tools').value = p.tools;
+  $('#prompt-presets').replaceChildren(...Object.keys(p.presets).map(k => {
+    const label = document.createElement('label');
+    const strong = document.createElement('strong');
+    strong.textContent = p.labels[k];
+    const box = document.createElement('textarea');
+    box.className = 'prompt-text';
+    box.rows = 6;
+    box.maxLength = 20000;
+    box.dataset.preset = k;
+    box.value = p.presets[k];
+    label.append(strong, box);
+    return label;
+  }));
+  $('#prompt-msg').textContent = '';
+  $('#prompts').showModal();
+};
+$('#prompt-reset').onclick = () => {
+  $('#prompt-system').value = promptDefaults.system;
+  $('#prompt-tools').value = promptDefaults.tools;
+  document.querySelectorAll('#prompt-presets textarea').forEach(b => { b.value = promptDefaults.presets[b.dataset.preset]; });
+  $('#prompt-msg').textContent = 'Default text loaded. Click Save to use it.';
+};
+$('#prompt-save').onclick = async () => {
+  const presets = Object.fromEntries([...document.querySelectorAll('#prompt-presets textarea')].map(b => [b.dataset.preset, b.value]));
+  await call('PUT', '/api/prompts', { system: $('#prompt-system').value, tools: $('#prompt-tools').value, presets });
+  $('#prompt-msg').textContent = 'Saved. The next question uses it.';
 };
 
 function showCli(s) {

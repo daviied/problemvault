@@ -4,6 +4,9 @@ Homework workspaces. One page per problem: paste the circuit or equation, work i
 
 - **Drawing**: InkVault's ink engine (`public/ink.js`) and tools: pen / pencil / highlighter, pressure and tilt, colours, sizes, dashed and dotted lines, scribble-to-erase, stroke or precise eraser, pen eraser end, lasso (move, copy, cut, duplicate, delete, paste), undo / redo, two-finger pan and zoom, palm rejection, black canvas, growing page.
 - **Images**: paste (Ctrl+V), drop or upload (camera on a phone). Move with the lasso, resize from the corner, write on top.
+- **Relevant equations**: **Equations** on the tablet bar, or **Relevant equations** in the Claude tab. The AI writes the equations for the problem below your work, with no numbers, steps or answer.
+- **Equation sheets**: hover a folder → **∑** → upload a PDF. Problems in that folder and its subfolders use it for Relevant equations. A needed equation that is not on the sheet gets a ⚠ flag: if it can be derived, the AI lists the sheet equations first and derives it only when you ask. With no sheet, nothing changes. Sheets stay in `DATA_DIR`, never in the repo.
+- **AI prompt**: Claude tab → **Edit AI prompt** changes the global prompt, the tool guide and the button prompts (Check, Next step, Equations, Update Calc, Submit) without a rebuild. **Reset to default** restores them. The Submit button prompt holds the rules for when the AI submits, so edit it with care. Typed notes from the AI still move off your writing, whatever the prompt says.
 - **PDFs**: upload, drop or paste a PDF. Each page becomes an image, stacked down the problem below your work (one undo). **⋯ → Export PDF (my writing only)** downloads a PDF with the pages, your ink and your typed text. Claude's ink and notes are left out. Work outside the PDF pages becomes extra pages.
 - **Text**: Text tool (T). Tap to type, `$…$` for math (KaTeX).
 - **Organised**: folders (course → assignment) with problems, drag to move, status (to do / working / done), search.
@@ -78,7 +81,7 @@ Then ask, e.g. *"check my work on HW4 #2"*. Claude tools: `list_workspaces`, `ge
 
 ## Gemini backup
 
-When your Claude limit is used up, Gemini can answer Ask Claude, **Check with Claude**, **Next step** and **Submit** with the same tools. Gemini uses an API key (Google's free tier, or pay per use).
+When your Claude limit is used up, Gemini can answer Ask Claude, **Check with Claude**, **Next step**, **Equations** and **Submit** with the same tools. Gemini uses an API key (Google's free tier, or pay per use).
 
 1. Make a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
 2. Plug icon → **Gemini backup** → paste → **Save** → **Test**. Or set `GEMINI_API_KEY` (and `GEMINI_MODEL`, default `gemini-flash-latest`).
