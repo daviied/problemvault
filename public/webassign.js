@@ -64,38 +64,87 @@ export async function render(refresh = false) {
   }
 }
 
+// Same as AssignPad's latexToMathml (v19): WebAssign grades only what MathType itself writes.
+const DASHES = /[−–‐]/g; // minus sign, en dash, hyphen -> ASCII "-"
+
 function latexToMathml(latex) {
   const tpl = document.createElement('template');
   tpl.innerHTML = `<math xmlns="${MML}">${ML.convertLatexToMathMl(latex)}</math>`;
   const m = tpl.content.firstElementChild;
-  // MathType does not send invisible operators, and writes function names (sin, ln, ...) as <mi>.
+  // MathType does not send invisible operators (function apply, times, separator, plus). Remove them.
   m.querySelectorAll('mo').forEach(o => {
-    if (/^[⁡⁢⁣]$/.test(o.textContent)) o.remove();
+    if (/^[⁡-⁤​]$/.test(o.textContent)) o.remove();
+    // MathType writes function names (sin, ln, ...) as <mi>.
     else if (/^[a-z]{2,}$/i.test(o.textContent)) {
       const mi = document.createElementNS(MML, 'mi'); mi.textContent = o.textContent; o.replaceWith(mi);
     }
   });
-  return new XMLSerializer().serializeToString(m).replace(/ xmlns="http:\/\/www.w3.org\/1999\/xhtml"/g, '');
+  // WebAssign reads "c1(1, 4)" as a function call. A list in parentheses right after a factor,
+  // or a matrix in parentheses, is a vector or matrix: write it with brackets, as MathType does.
+  m.querySelectorAll('mrow').forEach(g => {
+    const [open, body, close] = g.children;
+    if (g.children.length !== 3 || open.tagName !== 'mo' || open.textContent !== '(' || close.textContent !== ')') return;
+    const matrix = body.tagName === 'mtable';
+    if (!matrix && ![...body.children].some(c => c.tagName === 'mo' && c.textContent === ',')) return;
+    const prev = g.previousElementSibling;
+    if (matrix || (prev && ['mi', 'mn', 'msub', 'msup', 'mrow'].includes(prev.tagName))) {
+      open.textContent = '['; close.textContent = ']';
+    }
+  });
+  // WebAssign asks for column vectors "as a row vector", and some graders hang on column
+  // matrices. Write a one-column matrix as the list "a, b, c".
+  m.querySelectorAll('mtable').forEach(t => {
+    const rows = [...t.children];
+    if (!rows.length || rows.some(r => r.children.length !== 1)) return;
+    const list = document.createElementNS(MML, 'mrow');
+    rows.forEach((r, i) => {
+      if (i) { const c = document.createElementNS(MML, 'mo'); c.textContent = ','; list.append(c); }
+      list.append(...r.firstElementChild.childNodes);
+    });
+    t.replaceWith(list);
+  });
+  // WebAssign posts its form in a legacy charset: non-ASCII characters arrive as "?".
+  // MathType writes minus as ASCII "-" and other symbols as character references (&#x3C0;).
+  m.querySelectorAll('mo, mn, mi, mtext').forEach(o => {
+    const t = o.textContent.replace(DASHES, '-').replace(/[×∗·]/g, '⋅')
+      .replace(/ⅇ/g, 'e').replace(/ⅈ/g, 'i').replace(/ⅆ/g, 'd');
+    if (t !== o.textContent) o.textContent = t;
+  });
+  return new XMLSerializer().serializeToString(m).replace(/ xmlns="http:\/\/www.w3.org\/1999\/xhtml"/g, '')
+    .replace(/[^\x00-\x7F]/gu, c => `&#x${c.codePointAt(0).toString(16).toUpperCase()};`);
 }
 
-function buildQuestion(asg, q, body) {
+// Due time in this device's time zone (AssignPad sends dueTs, Unix seconds).
+function fmtDue(a) {
+  if (!a?.dueTs) return a?.due || '';
+  try {
+    return new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric',
+      hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }).format(new Date(a.dueTs * 1000));
+  } catch { return a.due || ''; }
+}
+
+function buildQuestion(asg, q, body, practice = null) {
   const esc = ctx.esc;
   const dep = ctx.getWs().meta.wa.dep;
+  // Practice versions have new numbers: no drafts.
+  const draft = practice ? { get: () => null, set() {} } : { get: n => store.get(draftKey(dep, n)), set: (n, v) => store.set(draftKey(dep, n), v) };
   const pts = (q.details?.Points || []).slice(-1)[0] || '';
   const allOk = q.parts.length && q.parts.every(p => p.mark === 'correct');
   const anyBad = q.parts.some(p => p.mark === 'incorrect');
-  body.innerHTML = `<div class="wa-info">${pts ? esc(pts) + ' pts' : ''}${q.submissions ? ' · submissions ' + esc(q.submissions) : ''}
+  body.innerHTML = `<div class="wa-info">${practice ? '<strong>Practice version</strong> · not graded' : (pts ? esc(pts) + ' pts' : '') + (q.submissions ? ' · submissions ' + esc(q.submissions) : '')}
       ${allOk ? '<span class="wa-badge ok">Correct</span>' : anyBad ? '<span class="wa-badge bad">Incorrect</span>' : ''}</div>
     <div class="wa-q"></div>
     <div class="wa-actions">
-      ${q.canSubmit ? '<button class="subtle" data-act="save">Save</button><button class="primary" data-act="submit">Submit</button>' : '<span class="muted small">No more submissions here.</span>'}
+      ${practice ? '<button class="primary" id="wa-check">Check answer</button><button class="subtle" id="wa-pav">New version</button><button class="subtle" id="wa-pclose">Back to question</button>'
+        : (q.canSubmit ? '<button class="subtle" data-act="save">Save</button><button class="primary" data-act="submit">Submit</button>' : '<span class="muted small">No more submissions here.</span>')
+          + '<button class="subtle" id="wa-pav" title="WebAssign makes a new version with new numbers. Not graded.">Practice another</button>'}
     </div>
     <div class="wa-actions">
       <button class="subtle" id="wa-to-problem">Use as problem text</button>
       <button class="subtle" id="wa-to-page">Add figures to page</button>
     </div>
     <div class="wa-ext muted small" id="wa-ext"></div>`;
-  showExtension(dep, body.querySelector('#wa-ext'));
+  if (practice) body.querySelector('#wa-ext').remove(); else showExtension(dep, body.querySelector('#wa-ext'));
   const root = body.querySelector('.wa-q').attachShadow({ mode: 'open' });
   root.innerHTML = (asg.styles || []).map(h => `<link rel="stylesheet" href="${esc(proxied(h))}">`).join('')
     + `<link rel="stylesheet" href="/vendor/mathlive/mathlive-static.css">
@@ -158,8 +207,7 @@ function buildQuestion(asg, q, body) {
     } else if (p.kind === 'matrix') {
       const slot = root.querySelector(`.ap-box[data-name="${p.name}"]`);
       if (!slot) continue;
-      const m = matrixEditor(store.get(draftKey(dep, p.name)) ?? p.value, p.rows, p.cols, !p.enabled,
-        v => store.set(draftKey(dep, p.name), v));
+      const m = matrixEditor(draft.get(p.name) ?? p.value, p.rows, p.cols, !p.enabled, v => draft.set(p.name, v));
       slot.append(m.el);
       if (!p.enabled) slot.insertAdjacentHTML('beforeend', '<span class="ap-lock">🔒</span>');
       mark(slot, p);
@@ -167,7 +215,7 @@ function buildQuestion(asg, q, body) {
     } else if (p.kind === 'math' || p.kind === 'text') {
       const slot = root.querySelector(`.ap-box[data-name="${p.name}"]`);
       if (!slot) continue;
-      const saved = store.get(draftKey(dep, p.name));
+      const saved = draft.get(p.name);
       let el;
       if (p.kind === 'math') {
         el = new ML.MathfieldElement();
@@ -179,7 +227,7 @@ function buildQuestion(asg, q, body) {
         el.className = 'ap-text';
         el.value = saved ?? p.value ?? '';
       }
-      el.addEventListener('input', () => store.set(draftKey(dep, p.name), el.value));
+      el.addEventListener('input', () => draft.set(p.name, el.value));
       slot.append(el);
       if (!p.enabled) {
         el.readOnly = true;
@@ -202,14 +250,14 @@ function buildQuestion(asg, q, body) {
       fields[p.name] = { part: p, el };
     } else {
       fields[p.name] = { part: p };
-      const saved = store.get(draftKey(dep, p.name));
+      const saved = draft.get(p.name);
       const els = root.querySelectorAll(`[name="${p.name}"]`);
       if (saved != null) els.forEach(i => {
         if (i.type === 'radio') i.checked = i.value === saved;
         else if (i.type === 'checkbox') i.checked = saved.includes(i.value);
         else i.value = saved;
       });
-      els.forEach(i => i.addEventListener('change', () => store.set(draftKey(dep, p.name), readChoice(root, p))));
+      els.forEach(i => i.addEventListener('change', () => draft.set(p.name, readChoice(root, p))));
       // WebAssign's own marks are hidden: show ✓/✗ after the last option (or the drop-down)
       const last = els[els.length - 1];
       if (last && p.mark) (last.closest('label, .ms') || last).insertAdjacentHTML('afterend',
@@ -218,6 +266,12 @@ function buildQuestion(asg, q, body) {
   }
 
   body.querySelectorAll('[data-act]').forEach(b => { b.onclick = () => send(asg, q, root, fields, b); });
+  const of = practice ? practice.of : q;
+  body.querySelector('#wa-pav').onclick = e => startPractice(asg, of, body, e.target);
+  if (practice) {
+    body.querySelector('#wa-pclose').onclick = () => render();
+    body.querySelector('#wa-check').onclick = e => checkPractice(asg, practice, body, root, fields, e.target);
+  }
   body.querySelector('#wa-to-problem').onclick = async () => {
     const ws = ctx.getWs();
     const text = toText(root.querySelector('.q'));
@@ -316,19 +370,54 @@ function readChoice(root, p) {
   return els[0]?.value ?? null;
 }
 
+function collectAnswers(root, fields) {
+  const answers = {};
+  for (const [name, f] of Object.entries(fields)) {
+    if (!f.part.enabled || f.part.kind === 'graph') continue;
+    if (f.part.kind === 'math') {
+      const latex = f.el.value.trim();
+      answers[name] = latex ? latexToMathml(latex) : '';
+    } else if (f.part.kind === 'text' || f.part.kind === 'matrix') answers[name] = f.el.value.replace(DASHES, '-');
+    else { const v = readChoice(root, f.part); if (v != null) answers[name] = v; }
+  }
+  return answers;
+}
+
+// "Practice Another": WebAssign makes a new version of the question with new numbers. Not graded.
+async function startPractice(asg, of, body, btn) {
+  const old = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Loading…';
+  try {
+    const r = await ctx.call('POST', `/api/webassign/assignments/${ctx.getWs().meta.wa.dep}/questions/${of.box}/practice`);
+    buildQuestion({ ...asg, styles: r.styles }, r.question, body, { id: r.id, of });
+  } catch (err) {
+    ctx.toast(err.message, 6000);
+    btn.disabled = false; btn.textContent = old;
+  }
+}
+
+async function checkPractice(asg, practice, body, root, fields, btn) {
+  const btns = body.querySelectorAll('.wa-actions button');
+  btns.forEach(b => { b.disabled = true; });
+  btn.textContent = 'Checking…';
+  try {
+    const r = await ctx.call('POST', `/api/webassign/practice/${practice.id}`, { answers: collectAnswers(root, fields) });
+    buildQuestion({ ...asg, styles: r.styles }, r.question, body, practice);
+    const parts = r.question.parts.filter(p => p.mark);
+    const ok = parts.filter(p => p.mark === 'correct').length;
+    ctx.toast(parts.length ? `Practice: ${ok} of ${parts.length} correct` : 'Checked', 3000);
+  } catch (err) {
+    ctx.toast(err.message, 6000);
+    btns.forEach(b => { b.disabled = false; });
+    btn.textContent = 'Check answer';
+  }
+}
+
 async function send(asg, q, root, fields, btn) {
   const link = ctx.getWs().meta.wa;
   const dep = link.dep;
   const action = btn.dataset.act;
-  const answers = {};
-  for (const [name, f] of Object.entries(fields)) {
-    if (!f.part.enabled) continue;
-    if (f.part.kind === 'math') {
-      const latex = f.el.value.trim();
-      answers[name] = latex ? latexToMathml(latex) : '';
-    } else if (f.part.kind === 'text' || f.part.kind === 'matrix') answers[name] = f.el.value;
-    else { const v = readChoice(root, f.part); if (v != null) answers[name] = v; }
-  }
+  const answers = collectAnswers(root, fields);
   if (action === 'submit' && !confirm(`Submit question ${q.number} to WebAssign?`)) return;
   const btns = btn.parentElement.querySelectorAll('button');
   btns.forEach(b => { b.disabled = true; });
@@ -382,7 +471,7 @@ async function showList(refresh = false) {
         el.className = 'wa-row';
         el.innerHTML = `<span class="n"></span><span class="m"></span>`;
         el.querySelector('.n').textContent = a.name;
-        el.querySelector('.m').textContent = [a.due && `due ${a.due}`, a.score].filter(Boolean).join(' · ');
+        el.querySelector('.m').textContent = [a.due && `due ${fmtDue(a)}`, a.score].filter(Boolean).join(' · ');
         el.onclick = () => { browsing = a.dep; showList(); };
         box.appendChild(el);
       }

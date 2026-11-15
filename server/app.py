@@ -315,6 +315,11 @@ class Handler(BaseHTTPRequestHandler):
                 b = self.json_body()
                 answers = b.get("answers") if isinstance(b.get("answers"), dict) else {}
                 return self.send(200, webassign.submit(rest[1], rest[3], answers, b.get("action")))
+            if len(rest) == 5 and rest[0] == "assignments" and rest[2] == "questions" and rest[4] == "practice" and method == "POST":
+                return self.send(200, webassign.practice_start(rest[1], rest[3]))
+            if len(rest) == 2 and rest[0] == "practice" and method == "POST":
+                b = self.json_body()
+                return self.send(200, webassign.practice_check(rest[1], b.get("answers") if isinstance(b.get("answers"), dict) else {}))
             if rest == ["proxy"] and method == "GET":
                 data, ctype = webassign.proxy(qs.get("u", ""))
                 if ctype.split(";")[0].strip() not in ("image/png", "image/jpeg", "image/gif", "image/svg+xml", "image/webp", "text/css"):

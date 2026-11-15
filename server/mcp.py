@@ -648,7 +648,7 @@ def matrix_value(v):
     rows = [[c[1:-1] if re.fullmatch(r"\(\d+\)", c) else c for c in r] for r in rows]
     if not rows or len({len(r) for r in rows}) != 1 or any(not c for r in rows for c in r):
         raise ValueError("every matrix row needs the same number of entries, none empty")
-    return "[" + ";".join(",".join(r) for r in rows) + "]"
+    return re.sub("[\u2212\u2013\u2010]", "-", "[" + ";".join(",".join(r) for r in rows) + "]")
 
 
 def choice_value(v, opts, kind):
@@ -693,7 +693,7 @@ def t_webassign_submit(args):
             if kind in ("radio", "checkbox", "select"):
                 answers[n] = choice_value(v, options.get(n, []), kind)
             else:
-                answers[n] = latex_to_mathml(str(v)) if kind == "math" else matrix_value(v) if kind == "matrix" else str(v)
+                answers[n] = latex_to_mathml(str(v)) if kind == "math" else matrix_value(v) if kind == "matrix" else re.sub("[\u2212\u2013\u2010]", "-", str(v))
         except ValueError as e:
             raise ToolError(f"{n}: {e}") from None
     if not _take_permit(w["id"]):  # after the checks: a bad answer does not use up the student's press

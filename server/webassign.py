@@ -77,6 +77,20 @@ def extension(dep, request=False):
     return _request("POST" if request else "GET", f"/api/assignments/{dep}/extension", {} if request else None, timeout=200)
 
 
+def practice_start(dep, box):
+    """"Practice Another": a new, ungraded version of the question. {id, question, styles}"""
+    if not str(dep).isdigit() or not re.fullmatch(r"question\d+_\d+", str(box)):
+        raise WebAssignError("Bad question")
+    return _request("POST", f"/api/assignments/{dep}/questions/{box}/practice", {}, timeout=120)
+
+
+def practice_check(pid, answers):
+    """Check answers on a practice version (not graded). {id, question, styles}"""
+    if not re.fullmatch(r"[\w-]{1,80}", str(pid)):
+        raise WebAssignError("Bad practice id")
+    return _request("POST", f"/api/practice/{pid}", {"answers": answers}, timeout=130)
+
+
 def proxy(u):
     """(bytes, content type) of a question image / stylesheet, through AssignPad."""
     return _request("GET", "/api/proxy?u=" + urllib.parse.quote(u, safe=""), raw=True, timeout=30)
