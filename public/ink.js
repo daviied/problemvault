@@ -341,8 +341,8 @@ const inkOrder = strokes => [...strokes.filter(s => s.tool === 'highlighter'), .
 // Draw a whole drawing into ctx, which must already be transformed into page units.
 // `skip`: ids of strokes not to draw (e.g. ones being dragged, drawn on another layer)
 // `bitmaps`: Map image id -> loaded HTMLImageElement / ImageBitmap
-export function drawPage(ctx, drawing, { live = [], dark = false, skip = null, bitmaps = null } = {}) {
-  ctx.fillStyle = dark ? PAPER_DARK : PAPER;
+export function drawPage(ctx, drawing, { live = [], dark = false, skip = null, bitmaps = null, paper = PAPER } = {}) {
+  ctx.fillStyle = dark ? PAPER_DARK : paper;
   ctx.fillRect(0, 0, drawing.width, drawing.height);
   for (const im of drawing.images || []) {
     if (skip && skip.has(im.id)) continue;

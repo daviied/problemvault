@@ -34,6 +34,7 @@ const settings = Object.assign({
   eraser: { size: 1, mode: 'stroke' },
   scribble: true,
   darkPaper: false,
+  whitePaper: false, // pure white instead of the warm off-white
   fingerDraws: false,
 }, load());
 function load() {
@@ -217,7 +218,7 @@ function renderBase() {
   let skip = input?.kind === 'move' || input?.kind === 'resize' ? new Set([...selection.ids, ...selection.imgs]) : null;
   const claudeInk = pages ? d.strokes.filter(s => s.by === 'claude' && !skip?.has(s.id)) : [];
   if (claudeInk.length) skip = new Set([...(skip || []), ...claudeInk.map(s => s.id)]);
-  drawPage(ctx, d, { dark: settings.darkPaper, skip, bitmaps: readyBitmaps() });
+  drawPage(ctx, d, { dark: settings.darkPaper, skip, bitmaps: readyBitmaps(), paper: settings.whitePaper ? '#ffffff' : undefined });
   ctx.restore();
   // Claude's marks are not clipped, so a note beside or below a page stays visible
   for (const s of claudeInk) drawStroke(ctx, s, { dark: settings.darkPaper });
@@ -1322,7 +1323,7 @@ export async function exportPdf() {
       cx.fillStyle = '#fff';
       cx.fillRect(0, 0, cv.width, cv.height);
       cx.setTransform(k, 0, 0, k, -r.x * k, -r.y * k);
-      drawPage(cx, mine, { bitmaps: bm });
+      drawPage(cx, mine, { bitmaps: bm, paper: '#ffffff' }); // exports are always pure white
       for (const t of texts) { // your typed text, as plain text
         cx.fillStyle = t.color || '#1f1f1f';
         cx.font = `${t.size}px system-ui, sans-serif`;
@@ -1561,6 +1562,7 @@ function renderToolbar() {
   }
   $('#opt-scribble').checked = settings.scribble;
   $('#opt-dark').checked = settings.darkPaper;
+  $('#opt-white').checked = settings.whitePaper;
   $('#opt-precise').checked = settings.eraser.mode === 'precise';
   $('#opt-finger').checked = settings.fingerDraws;
 }
@@ -1577,6 +1579,11 @@ $('#opt-dark').onchange = e => {
   settings.darkPaper = e.target.checked;
   save();
   renderToolbar();
+  dirty.base = dirty.live = true;
+};
+$('#opt-white').onchange = e => {
+  settings.whitePaper = e.target.checked;
+  save();
   dirty.base = dirty.live = true;
 };
 $('#opt-precise').onchange = e => { settings.eraser.mode = e.target.checked ? 'precise' : 'stroke'; save(); };
