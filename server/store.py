@@ -441,6 +441,19 @@ def _pdf_meta(m):
     }
 
 
+def sanitize_layout(lay):
+    """Page mode: {"on": bool, "pages": [{x, y, w, h, pw, ph}]} in page units (pw/ph: PDF points)."""
+    if not isinstance(lay, dict):
+        return None
+    pages = []
+    for p in (lay.get("pages") if isinstance(lay.get("pages"), list) else [])[:500]:
+        if isinstance(p, dict):
+            pages.append({"x": _num(p.get("x"), -1e5, 1e5, 20), "y": _num(p.get("y"), -1e5, 1e5, 0),
+                          "w": _num(p.get("w"), 50, 1e5, 960), "h": _num(p.get("h"), 50, 1e5, 1242),
+                          "pw": _num(p.get("pw"), 1, 20000, 612), "ph": _num(p.get("ph"), 1, 20000, 792)})
+    return {"on": bool(lay.get("on")), "pages": pages}
+
+
 def sanitize_change(c):
     if not isinstance(c, dict):
         return None
@@ -458,6 +471,8 @@ def sanitize_change(c):
         out["textRemove"] = ids(c["textRemove"])
     if "textAdd" in c and isinstance(c["textAdd"], list):
         out["textAdd"] = [t for t in map(sanitize_text, c["textAdd"]) if t]
+    if "layout" in c:
+        out["layout"] = sanitize_layout(c["layout"])
     if "height" in c:
         h = _num(c["height"], 100, 40000, None)
         if h is not None:
@@ -494,6 +509,11 @@ def apply_change(wid, change):
             d["texts"].sort(key=lambda t: t["z"])
         if "height" in change:
             d["height"] = change["height"]
+        if "layout" in change:
+            if change["layout"]:
+                d["layout"] = change["layout"]
+            else:
+                d.pop("layout", None)
         _write(os.path.join(ws_dir(wid), "page.json"), d)
     touch(wid)
     return d

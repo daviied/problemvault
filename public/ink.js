@@ -438,6 +438,7 @@ export function sanitizeChange(c) {
   if (Array.isArray(c.remove)) out.remove = c.remove.filter(id => typeof id === 'string' && ID_RE.test(id));
   if (Array.isArray(c.add)) out.add = c.add.map(sanitizeStroke).filter(Boolean);
   if (c.height !== undefined) out.height = num(c.height, 100, 40000, undefined);
+  if (c.layout !== undefined) out.layout = c.layout;
   return out;
 }
 
@@ -473,6 +474,7 @@ export function applyChange(d, c) {
     d.texts.sort((a, b) => a.z - b.z);
   }
   if (typeof c.height === 'number') d.height = c.height;
+  if (c.layout !== undefined) { if (c.layout) d.layout = c.layout; else delete d.layout; }
   return d;
 }
 
@@ -496,6 +498,7 @@ export function inverseOf(d, c) {
     inv.textAdd = [...(c.textRemove || []), ...(c.textAdd || []).map(t => t.id)].map(id => texts.get(id)).filter(Boolean);
   }
   if (typeof c.height === 'number') inv.height = d.height;
+  if (c.layout !== undefined) inv.layout = d.layout ?? null;
   return inv;
 }
 

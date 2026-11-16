@@ -200,21 +200,29 @@ function renderBase() {
   if (!current) { renderTexts(); return; }
   const d = current.drawing;
   applyView(ctx);
+  const pages = layoutOn() ? d.layout.pages : null;
   ctx.save();
   ctx.shadowColor = 'rgba(0,0,0,.35)';
   ctx.shadowBlur = 18 / view.scale;
   ctx.fillStyle = settings.darkPaper ? PAPER_DARK : '#fff';
-  ctx.fillRect(0, 0, d.width, d.height);
+  if (pages) for (const p of pages) ctx.fillRect(p.x, p.y, p.w, p.h);
+  else ctx.fillRect(0, 0, d.width, d.height);
   ctx.restore();
   ctx.save();
   ctx.beginPath();
-  ctx.rect(0, 0, d.width, d.height);
+  if (pages) for (const p of pages) ctx.rect(p.x, p.y, p.w, p.h); // page mode: ink stays on the pages
+  else ctx.rect(0, 0, d.width, d.height);
   ctx.clip();
   // strokes / images being dragged are drawn on the live layer instead
-  const skip = input?.kind === 'move' || input?.kind === 'resize' ? new Set([...selection.ids, ...selection.imgs]) : null;
+  let skip = input?.kind === 'move' || input?.kind === 'resize' ? new Set([...selection.ids, ...selection.imgs]) : null;
+  const claudeInk = pages ? d.strokes.filter(s => s.by === 'claude' && !skip?.has(s.id)) : [];
+  if (claudeInk.length) skip = new Set([...(skip || []), ...claudeInk.map(s => s.id)]);
   drawPage(ctx, d, { dark: settings.darkPaper, skip, bitmaps: readyBitmaps() });
   ctx.restore();
+  // Claude's marks are not clipped, so a note beside or below a page stays visible
+  for (const s of claudeInk) drawStroke(ctx, s, { dark: settings.darkPaper });
   renderTexts();
+  syncPageUi();
   if (settings.darkPaper) {
     ctx.strokeStyle = 'rgba(255,255,255,.12)';
     ctx.lineWidth = 1 / view.scale;
@@ -554,7 +562,7 @@ function finishStroke(stroke) {
   }
   const change = { add: [stroke] };
   const maxY = Math.max(...stroke.pts.map(p => p[1]));
-  if (maxY > current.drawing.height - 80) change.height = Math.ceil(maxY + 300); // grow the page as you write
+  if (!layoutOn() && maxY > current.drawing.height - 80) change.height = Math.ceil(maxY + 300); // grow the page as you write
   commit(change);
 }
 
@@ -774,6 +782,7 @@ const shifted = (s, dx, dy, extra = {}) => ({
 });
 
 function growFor(strokes, change, images = []) {
+  if (layoutOn()) return change; // page mode: use Add page
   const maxY = Math.max(...strokes.flatMap(s => s.pts.map(p => p[1])), ...images.map(i => i.y + i.h), 0);
   if (maxY > current.drawing.height - 80) change.height = Math.ceil(maxY + 300);
   return change;
@@ -1068,7 +1077,7 @@ export async function pdfToPngs(file, maxPages = 10, width = 1400) {
     const cx = cv.getContext('2d');
     cx.fillStyle = '#fff';
     cx.fillRect(0, 0, cv.width, cv.height);
-    await page.render({ canvasContext: cx, viewport: vp }).promise;
+    await page.render({ canvasContext: cx, viewport: vp, intent: 'print' }).promise; // print: no animation frames, so it runs in a background tab too
     const blob = await new Promise(r => cv.toBlob(r, 'image/png'));
     out.push(await b64(await blob.arrayBuffer()));
   }
@@ -1109,7 +1118,11 @@ export async function insertPdf(file) {
     if (n > PDF_MAX_PAGES && !confirm(`This PDF has ${n} pages. Add only the first ${PDF_MAX_PAGES}?`)) return;
     n = Math.min(n, PDF_MAX_PAGES);
     const dispW = PAGE_WIDTH - PDF_MARGIN * 2;
-    let y = contentBottom();
+    // Page mode turns on: each PDF page is a page; work already here gets its own pages first.
+    const d0 = current.drawing;
+    const before = d0.layout?.pages?.length ? d0.layout.pages
+      : exportRegions(d0, d0.strokes.filter(s => s.by !== 'claude'), (d0.texts || []).filter(t => t.by !== 'claude')).map(pageOf);
+    let y = Math.max(contentBottom(), ...before.map(p => p.y + p.h - 30)); // the gap is added below
     y = y > 0 ? Math.round(y + 60) : PDF_MARGIN;
     const added = [];
     for (let i = 1; i <= n; i++) {
@@ -1123,7 +1136,7 @@ export async function insertPdf(file) {
       const cx = cv.getContext('2d');
       cx.fillStyle = '#fff';
       cx.fillRect(0, 0, cv.width, cv.height);
-      await page.render({ canvasContext: cx, viewport: vp }).promise;
+      await page.render({ canvasContext: cx, viewport: vp, intent: 'print' }).promise; // print: no animation frames, so it runs in a background tab too
       page.cleanup();
       const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.88));
       const imgId = await uploadPicture(id, cv, cv.width, cv.height, blob, 'image/jpeg', `${name} p${i}`);
@@ -1143,12 +1156,65 @@ export async function insertPdf(file) {
     }
     doc.destroy();
     if (!added.length) return;
-    commit(growFor([], { imgAdd: added }, added)); // one undo for the whole PDF
+    const d = current.drawing;
+    const pdfPages = added.map(i => ({ x: i.x, y: i.y, w: i.w, h: i.h, pw: i.pdf.pw, ph: i.pdf.ph }));
+    const pages = [...before, ...pdfPages];
+    const last = pdfPages[pdfPages.length - 1];
+    commit({ imgAdd: added, layout: { on: true, pages }, height: Math.max(d.height, Math.ceil(last.y + last.h + 60)) }); // one undo for the whole PDF
     api.toast(`Added ${added.length} PDF page${added.length > 1 ? 's' : ''}. Write on them, then use ⋯ → Export PDF.`, 4000);
   } catch (err) {
     if (/password/i.test(err?.name || err?.message || '')) api.toast('That PDF is password-protected. Remove the password first.', 5000);
     else reportError(err);
   }
+}
+
+// --- page mode ----------------------------------------------------------------
+
+function layoutOn() { return !!current?.drawing.layout?.on; }
+function pagesBottom() { return Math.max(0, ...(current?.drawing.layout?.pages || []).map(p => p.y + p.h)); }
+// a region from exportRegions as a page (Letter-shaped blank pages keep their points size)
+const pageOf = r => ({ x: r.x, y: r.y, w: r.w, h: r.h, pw: r.pw, ph: Math.round(r.pw * r.h / r.w * 100) / 100 });
+
+function syncPageUi() {
+  const on = layoutOn();
+  $('#opt-pages').checked = on;
+  const b = $('#add-space');
+  b.title = on ? 'Add page' : 'Add space below';
+  b.setAttribute('aria-label', b.title);
+  b.classList.toggle('pages', on);
+}
+
+// Page mode on/off. Turning it on the first time makes pages from the PDF pages and
+// from your work (Letter-size pages). Off keeps the pages, so on brings them back.
+function setPageMode(on) {
+  if (!current || readOnly) return;
+  const d = current.drawing;
+  if (!on) return d.layout && commit({ layout: { ...d.layout, on: false } });
+  let pages = d.layout?.pages || [];
+  if (!pages.length) {
+    pages = exportRegions(d, d.strokes.filter(s => s.by !== 'claude'), (d.texts || []).filter(t => t.by !== 'claude')).map(pageOf);
+    if (!pages.length) pages = [blankPage(null)];
+  }
+  const bottom = Math.max(...pages.map(p => p.y + p.h));
+  commit({ layout: { on: true, pages }, height: Math.max(d.height, Math.ceil(bottom + 60)) });
+}
+
+function blankPage(last) {
+  if (!last) return { x: PDF_MARGIN, y: PDF_MARGIN, w: PAGE_WIDTH - PDF_MARGIN * 2, h: Math.round((PAGE_WIDTH - PDF_MARGIN * 2) * LETTER.ph / LETTER.pw), ...LETTER };
+  return { ...last, y: Math.round(last.y + last.h + PDF_GAP) };
+}
+
+// Toolbar button: a new page (same size as the last) in page mode, more paper otherwise.
+function addSpace() {
+  if (!current || readOnly) return;
+  const d = current.drawing;
+  if (!layoutOn()) return commit({ height: d.height + 600 });
+  const pages = d.layout.pages;
+  const last = pages.reduce((a, p) => (!a || p.y > a.y ? p : a), null);
+  const page = blankPage(last);
+  commit({ layout: { on: true, pages: [...pages, page] }, height: Math.max(d.height, Math.ceil(page.y + page.h + 60)) });
+  view.oy = Math.min(0, -(page.y - 20) * view.scale); // show the new page
+  dirty.base = dirty.live = true;
 }
 
 // --- export -----------------------------------------------------------------
@@ -1217,7 +1283,7 @@ export async function exportPdf() {
     const bm = readyBitmaps();
     const mine = { ...d, strokes, texts: [] };
     const pages = [];
-    for (const r of exportRegions(d, strokes, texts)) {
+    for (const r of layoutOn() ? d.layout.pages : exportRegions(d, strokes, texts)) {
       const k = PDF_RENDER_W / r.w;
       const cv = document.createElement('canvas');
       cv.width = Math.round(r.w * k);
@@ -1486,7 +1552,9 @@ $('#opt-dark').onchange = e => {
 $('#opt-precise').onchange = e => { settings.eraser.mode = e.target.checked ? 'precise' : 'stroke'; save(); };
 $('#opt-finger').onchange = e => { settings.fingerDraws = e.target.checked; save(); };
 $('#act-pdf').onclick = () => { closeMenu(); exportPdf(); };
-$('#act-extend').onclick = () => { if (current) commit({ height: current.drawing.height + 400 }); closeMenu(); };
+$('#act-extend').onclick = () => { addSpace(); closeMenu(); };
+$('#add-space').onclick = addSpace;
+$('#opt-pages').onchange = e => { setPageMode(e.target.checked); closeMenu(); };
 $('#act-fit').onclick = () => { fitWidth(); closeMenu(); };
 $('#act-clear').onclick = () => {
   closeMenu();
