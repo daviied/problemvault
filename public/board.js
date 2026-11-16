@@ -444,13 +444,11 @@ function onPenDown(e) {
     input = { kind: 'erase', pointerId: e.pointerId, last: p, removed: new Map(), added: new Map() };
     eraseTo(p);
   } else if (settings.tool === 'lasso') {
-    // the resize handle of a single selected image; inside the selection: drag it; else a new lasso
+    // the corner handle resizes the selection; inside the selection: drag it; else a new lasso
     const b = selection && selectionBox();
-    const handle = selection && selection.imgs.size === 1 && !selection.ids.size && !selection.texts.size && b
-      && Math.hypot(p[0] - b.maxX, p[1] - b.maxY) < 16 / view.scale;
+    const handle = b && Math.hypot(p[0] - b.maxX, p[1] - b.maxY) < (e.pointerType === 'touch' ? 26 : 16) / view.scale;
     if (handle) {
-      const im = current.drawing.images.find(i => selection.imgs.has(i.id));
-      input = { kind: 'resize', pointerId: e.pointerId, start: p, im, k: 1 };
+      input = { kind: 'resize', pointerId: e.pointerId, start: p, box: b, k: 1 };
       dirty.base = true;
     } else if (b && p[0] >= b.minX && p[0] <= b.maxX && p[1] >= b.minY && p[1] <= b.maxY) {
       input = { kind: 'move', pointerId: e.pointerId, start: p, dx: 0, dy: 0 };
@@ -496,8 +494,11 @@ function onPenMove(e) {
       input.dx = p[0] - input.start[0];
       input.dy = p[1] - input.start[1];
     } else if (input.kind === 'resize') {
-      const im = input.im;
-      input.k = Math.max(40 / im.w, (p[0] - im.x) / im.w); // keeps the aspect ratio
+      // scale about the top-left corner, same in x and y: project the pen onto the box diagonal
+      const { minX, minY, maxX, maxY } = input.box;
+      const w = maxX - minX, h = maxY - minY;
+      const k = ((p[0] - minX) * w + (p[1] - minY) * h) / (w * w + h * h);
+      input.k = Math.min(20, Math.max(20 / Math.max(w, h), k));
     } else {
       const pts = input.stroke.pts;
       const q = pts[pts.length - 1];
@@ -666,7 +667,7 @@ function endGesture() {
 // ---------------------------------------------------------------------------
 // Lasso selection: circle writing (or tap a stroke / image) to select it,
 // then drag it, or copy / cut / duplicate / delete it from the bar above it.
-// A single selected image gets a corner handle to resize it.
+// The corner handle resizes the selection (ink, images and text).
 // ---------------------------------------------------------------------------
 
 let selection = null; // { ids: Set, imgs: Set, texts: Set, halo: [stroke] }
@@ -803,12 +804,28 @@ function finishMove(dx, dy) {
   setSelection(ids, imgs, texts);
 }
 
-function finishResize({ im, k }) {
+// Resize: everything selected scales by k about the box's top-left corner (ink width too).
+const r1 = v => Math.round(v * 10) / 10;
+function scaledStroke(s, ox, oy, k) {
+  return { ...s, size: Math.min(200, Math.max(0.3, r1(s.size * k))), pts: s.pts.map(p => [r1(ox + (p[0] - ox) * k), r1(oy + (p[1] - oy) * k), p[2], p[3]]) };
+}
+
+function finishResize({ box, k }) {
   dirty.base = true;
   if (Math.abs(k - 1) < 0.01) return;
-  const resized = { ...im, w: Math.round(im.w * k), h: Math.round(im.h * k) };
-  commit(growFor([], { imgAdd: [resized] }, [resized]));
-  setSelection(null, new Set([im.id]));
+  const { ids, imgs, texts } = selection;
+  const ox = box.minX, oy = box.minY;
+  const strokes = selectedStrokes().map(s => scaledStroke(s, ox, oy, k)); // same ids: replaces the originals
+  const images = selectedImages().map(i => ({ ...i, x: Math.round(ox + (i.x - ox) * k), y: Math.round(oy + (i.y - oy) * k),
+    w: Math.max(4, Math.round(i.w * k)), h: Math.max(4, Math.round(i.h * k)) }));
+  const txs = selectedTexts().map(t => ({ ...t, x: Math.round(ox + (t.x - ox) * k), y: Math.round(oy + (t.y - oy) * k),
+    w: Math.min(1000, Math.max(20, Math.round(t.w * k))), size: Math.min(120, Math.max(8, r1(t.size * k))) }));
+  const change = growFor(strokes, {}, images);
+  if (strokes.length) change.add = strokes;
+  if (images.length) change.imgAdd = images;
+  if (txs.length) change.textAdd = txs;
+  commit(change);
+  setSelection(ids, imgs, texts);
 }
 
 // new copies of strokes (new ids, painted on top in their original order)
@@ -884,9 +901,16 @@ function renderSelection(ctx) {
     ctx.stroke();
     ctx.restore();
   }
-  for (const [id, c] of textCache) { // selected text follows the drag
-    const on = input?.kind === 'move' && !!selection?.texts.has(id);
-    c.el.style.transform = on ? `translate(${input.dx}px, ${input.dy}px)` : '';
+  for (const [id, c] of textCache) { // selected text follows the drag / resize
+    const on = (input?.kind === 'move' || input?.kind === 'resize') && !!selection?.texts.has(id);
+    let tf = '';
+    if (on && input.kind === 'move') tf = `translate(${input.dx}px, ${input.dy}px)`;
+    else if (on) {
+      const t = current.drawing.texts.find(x => x.id === id), { minX: ox, minY: oy } = input.box, k = input.k;
+      if (t) tf = `translate(${(ox + (t.x - ox) * k) - t.x}px, ${(oy + (t.y - oy) * k) - t.y}px) scale(${k})`;
+    }
+    c.el.style.transformOrigin = '0 0';
+    c.el.style.transform = tf;
     c.el.classList.toggle('moving', on);
   }
   if (!selection) {
@@ -900,28 +924,34 @@ function renderSelection(ctx) {
   const bms = readyBitmaps();
   ctx.save();
   ctx.translate(dx, dy);
+  if (resizing) {
+    // preview: the selection scaled about the box's top-left corner
+    const { minX: ox, minY: oy } = input.box, k = input.k;
+    ctx.translate(ox, oy);
+    ctx.scale(k, k);
+    ctx.translate(-ox, -oy);
+  }
   if (moving || resizing) {
     for (const i of selectedImages()) {
-      const k = resizing ? input.k : 1;
       const bm = bms.get(i.id);
-      if (bm) ctx.drawImage(bm, i.x, i.y, i.w * k, i.h * k);
+      if (bm) ctx.drawImage(bm, i.x, i.y, i.w, i.h);
     }
   }
   for (const h of selection.halo) drawStroke(ctx, h, { alphaScale: 0.28 });
-  if (moving) for (const s of selectedStrokes()) drawStroke(ctx, s, { dark: settings.darkPaper });
+  if (moving || resizing) for (const s of selectedStrokes()) drawStroke(ctx, s, { dark: settings.darkPaper });
   ctx.restore();
   let b = selectionBox(dx, dy);
   if (!b) return;
   if (resizing) {
-    const i = input.im;
-    b = { minX: i.x, minY: i.y, maxX: i.x + i.w * input.k, maxY: i.y + i.h * input.k };
+    const { minX, minY, maxX, maxY } = input.box, k = input.k;
+    b = { minX, minY, maxX: minX + (maxX - minX) * k, maxY: minY + (maxY - minY) * k };
   }
   ctx.save();
   ctx.strokeStyle = SEL_COLOR;
   ctx.lineWidth = 1.2 / view.scale;
   ctx.setLineDash([5 / view.scale, 4 / view.scale]);
   ctx.strokeRect(b.minX, b.minY, b.maxX - b.minX, b.maxY - b.minY);
-  if (selection.imgs.size === 1 && !selection.ids.size && !selection.texts.size) {
+  { // corner handle: drag to resize
     ctx.setLineDash([]);
     ctx.fillStyle = '#fff';
     ctx.lineWidth = 2 / view.scale;

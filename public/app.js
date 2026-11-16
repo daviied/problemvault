@@ -416,7 +416,7 @@ $('#panel-toggle').onclick = () => setPanel(!$('#main').classList.contains('pane
 setPanel(MODE === 'phone' || (MODE === 'desktop' && localStorage.getItem('problemvault.panel') !== '0' && innerWidth > 1100));
 if (MODE === 'phone') board.setReadOnly(true);
 // desktop: no drawing (that is the tablet's job), only select / move / resize and images
-if (MODE === 'desktop') board.setTools(['lasso'], { imagesOnly: true });
+if (MODE === 'desktop') board.setTools(['lasso']); // the lasso selects writing, text and images (tap selects one thing)
 document.documentElement.dataset.mode = MODE;
 
 // ---------------------------------------------------------------------------

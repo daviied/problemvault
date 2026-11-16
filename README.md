@@ -2,7 +2,7 @@
 
 Homework workspaces. One page per problem: paste the circuit or equation, work it out on top in pen ink, and let Claude read, mark up and comment on it, on your normal Claude subscription (no API key).
 
-- **Drawing**: InkVault's ink engine (`public/ink.js`) and tools: pen / pencil / highlighter, pressure and tilt, colours, sizes, dashed and dotted lines, scribble-to-erase, stroke or precise eraser, pen eraser end, lasso (move, copy, cut, duplicate, delete, paste), undo / redo, two-finger pan and zoom, palm rejection, black canvas, growing page.
+- **Drawing**: InkVault's ink engine (`public/ink.js`) and tools: pen / pencil / highlighter, pressure and tilt, colours, sizes, dashed and dotted lines, scribble-to-erase, stroke or precise eraser, pen eraser end, lasso (move, resize from the corner handle, copy, cut, duplicate, delete, paste), undo / redo, two-finger pan and zoom, palm rejection, black canvas, growing page.
 - **Images**: paste (Ctrl+V), drop or upload (camera on a phone). Move with the lasso, resize from the corner, write on top.
 - **Relevant equations**: **Equations** on the tablet bar, or **Relevant equations** in the Claude tab. The AI writes the equations for the problem below your work, with no numbers, steps or answer.
 - **Equation sheets**: hover a folder → **∑** → upload a PDF. Problems in that folder and its subfolders use it for Relevant equations. A needed equation that is not on the sheet gets a ⚠ flag: if it can be derived, the AI lists the sheet equations first and derives it only when you ask. With no sheet, nothing changes. Sheets stay in `DATA_DIR`, never in the repo.
